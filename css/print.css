@@ -1,0 +1,96 @@
+/* ============================================================
+   print.css — styles for @media print and report previews
+   ============================================================ */
+@media print {
+
+    html,
+    body {
+        background: #fff !important;
+        color: #000 !important;
+    }
+
+    .sidebar,
+    .topbar,
+    .bottom-nav,
+    .toast-host,
+    .modal-host,
+    .boot-loader,
+    .no-print,
+    .page-actions,
+    .btn-primary,
+    .btn-ghost,
+    .btn-danger,
+    .btn-success {
+        display: none !important;
+    }
+
+    #app-shell {
+        display: block !important;
+    }
+
+    .view {
+        padding: 0 !important;
+        max-width: none !important;
+    }
+
+    .card,
+    .table-wrap {
+        box-shadow: none !important;
+        border-color: #999 !important;
+    }
+
+    table.data th,
+    table.data td {
+        border-color: #999 !important;
+        color: #000 !important;
+    }
+
+    a {
+        color: #000 !important;
+        text-decoration: none !important;
+    }
+
+    .kpi::before {
+        display: none !important;
+    }
+}
+
+/* On-screen report preview shell (used by PDF modal, harmless otherwise) */
+.report-preview {
+    background: #fff;
+    color: #111;
+    padding: 20mm;
+    max-width: 210mm;
+    margin: 0 auto;
+}
+
+.report-preview h1 {
+    font-size: 18pt;
+    margin-bottom: 4pt;
+}
+
+.report-preview h2 {
+    font-size: 13pt;
+    margin-top: 12pt;
+}
+
+.report-preview table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10pt;
+}
+
+.report-preview th,
+.report-preview td {
+    border: 1px solid #ccc;
+    padding: 6pt;
+}
+
+.report-preview th {
+    background: #0f5132;
+    color: #fff;
+}
+
+.report-preview tr:nth-child(even) td {
+    background: #f6f8f7;
+}

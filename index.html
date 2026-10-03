@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f5132">
+    <meta name="referrer" content="no-referrer">
+    <link rel="preconnect" href="https://pub-cf11059ab3634dc1aadcd8682fc2dcc5.r2.dev" crossorigin>
+    <title>ECOLE LA FONTAINE Staff Cooperative</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>">
+</head>
+
+<body>
+
+    <!-- ============ APP SHELL ============ -->
+    <div id="app-shell">
+
+        <!-- Sidebar (desktop) -->
+        <aside id="sidebar" class="sidebar">
+            <div class="brand">
+                <div class="brand-mark" id="brand-mark">
+                    <img src="https://pub-cf11059ab3634dc1aadcd8682fc2dcc5.r2.dev/logo.png" alt="ECOLE LA FONTAINE"
+                        onerror="this.style.display='none'; this.parentElement.classList.add('fallback');">
+                    <span class="brand-mark-text">ELF</span>
+                </div>
+                <div class="brand-text">
+                    <div class="brand-title">Ecole La Fontaine</div>
+                    <div class="brand-sub">Staff Cooperative</div>
+                </div>
+            </div>
+
+            <nav class="nav">
+                <a class="nav-item" data-route="dashboard"><span class="nav-ico">◈</span>Dashboard</a>
+
+                <div class="nav-group">Operations</div>
+                <a class="nav-item" data-route="contributions"><span class="nav-ico">＋</span>Contributions</a>
+                <a class="nav-item" data-route="loans"><span class="nav-ico">◐</span>Loans</a>
+                <a class="nav-item" data-route="repayments"><span class="nav-ico">↺</span>Repayments</a>
+                <a class="nav-item" data-route="emergency"><span class="nav-ico">✚</span>Emergency Fund</a>
+                <a class="nav-item" data-route="income"><span class="nav-ico">↑</span>Income</a>
+                <a class="nav-item" data-route="expenses"><span class="nav-ico">↓</span>Expenses</a>
+
+                <div class="nav-group">People</div>
+                <a class="nav-item" data-route="members"><span class="nav-ico">◉</span>Members</a>
+                <a class="nav-item" data-route="sponsors"><span class="nav-ico">☆</span>Sponsors</a>
+                <a class="nav-item" data-route="borrowers"><span class="nav-ico">◇</span>Borrowers</a>
+
+                <div class="nav-group">Finance</div>
+                <a class="nav-item" data-route="transactions"><span class="nav-ico">≡</span>Transactions</a>
+                <a class="nav-item" data-route="profit"><span class="nav-ico">◆</span>Profit</a>
+
+                <div class="nav-group">Reports</div>
+                <a class="nav-item" data-route="reports"><span class="nav-ico">▤</span>Report Center</a>
+                <a class="nav-item" data-route="audit"><span class="nav-ico">⌘</span>Audit Log</a>
+
+                <div class="nav-group">Administration</div>
+                <a class="nav-item" data-route="settings"><span class="nav-ico">⚙</span>Settings</a>
+            </nav>
+
+            <div class="sidebar-foot">
+                <button id="theme-toggle" class="btn-ghost" type="button">🌓 Theme</button>
+                <div class="net-pill" id="net-pill"><span class="dot"></span><span>Online</span></div>
+            </div>
+        </aside>
+
+        <!-- Main -->
+        <main id="main">
+            <header class="topbar">
+                <button id="menu-btn" class="icon-btn" aria-label="Menu">☰</button>
+                <div class="search-wrap">
+                    <input id="global-search" type="search" placeholder="Search members, loans, transactions…"
+                        autocomplete="off">
+                    <div id="search-results" class="search-results hidden"></div>
+                </div>
+                <div class="topbar-actions">
+                    <button id="btn-backup" class="btn-ghost" title="Backup">⤓</button>
+                    <button id="btn-quick" class="btn-primary" title="Quick contribution">+ New</button>
+                </div>
+            </header>
+
+            <section id="view" class="view"></section>
+        </main>
+
+        <!-- Mobile bottom nav -->
+        <nav class="bottom-nav" id="bottom-nav">
+            <a data-route="dashboard" class="bn-item"><span>◈</span><em>Home</em></a>
+            <a data-route="contributions" class="bn-item"><span>＋</span><em>Contribute</em></a>
+            <a data-route="loans" class="bn-item"><span>◐</span><em>Loans</em></a>
+            <a data-route="members" class="bn-item"><span>◉</span><em>Members</em></a>
+            <a data-route="reports" class="bn-item"><span>▤</span><em>Reports</em></a>
+        </nav>
+    </div>
+
+    <!-- ============ MODAL HOST ============ -->
+    <div id="modal-host" class="modal-host hidden">
+        <div class="modal-backdrop" data-close></div>
+        <div class="modal" role="dialog" aria-modal="true">
+            <header class="modal-head">
+                <h3 id="modal-title">Dialog</h3>
+                <button class="icon-btn" data-close aria-label="Close">✕</button>
+            </header>
+            <div id="modal-body" class="modal-body"></div>
+            <footer id="modal-foot" class="modal-foot"></footer>
+        </div>
+    </div>
+
+    <!-- ============ TOAST HOST ============ -->
+    <div id="toast-host" class="toast-host"></div>
+
+    <!-- ============ LOADER ============ -->
+    <div id="boot-loader" class="boot-loader">
+        <div class="boot-inner">
+            <img src="https://pub-cf11059ab3634dc1aadcd8682fc2dcc5.r2.dev/logo.png" alt="ECOLE LA FONTAINE"
+                style="width:80px;height:80px;object-fit:contain;margin-bottom:14px;border-radius:14px;background:#fff;padding:6px;box-shadow:0 4px 12px rgba(0,0,0,.08)"
+                onerror="this.style.display='none'">
+            <div class="boot-text">Loading cooperative…</div>
+        </div>
+    </div>
+
+    <!-- ============ PDF / CHART LIBS ============ -->
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+
+    <!-- ============ APP SCRIPTS ============ -->
+    <script src="js/config.js"></script>
+    <script src="js/money.js"></script>
+    <script src="js/engine.js"></script>
+    <script src="js/db.js"></script>
+    <script src="js/audit.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/pdf.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/router.js"></script>
+
+    <script src="js/views/dashboard.js"></script>
+    <script src="js/views/members.js"></script>
+    <script src="js/views/sponsors.js"></script>
+    <script src="js/views/borrowers.js"></script>
+    <script src="js/views/contributions.js"></script>
+    <script src="js/views/loans.js"></script>
+    <script src="js/views/repayments.js"></script>
+    <script src="js/views/emergency.js"></script>
+    <script src="js/views/income.js"></script>
+    <script src="js/views/expenses.js"></script>
+    <script src="js/views/transactions.js"></script>
+    <script src="js/views/profit.js"></script>
+    <script src="js/views/reports.js"></script>
+    <script src="js/views/settings.js"></script>
+    <script src="js/views/audit.js"></script>
+
+    <script src="js/app.js"></script>
+</body>
+
+</html>
