@@ -317,7 +317,7 @@ ELF.db = (function () {
         return data;
     }
 
-    async function recordRepayment({ loan_id, member_id, borrower_id, sponsor_id, total_received, payment_date, method, split, notes }) {
+        async function recordRepayment({ loan_id, member_id, borrower_id, sponsor_id, total_received, payment_date, method, split, notes }) {
         const account = await getAccountByCode(methodToAccount(method));
         const gen = await nextNumber('report.prefix');
         const txn = await run(sb.from('transactions').insert({
@@ -365,6 +365,19 @@ ELF.db = (function () {
                 description: `Share purchase via repayment (${shares} share(s))`,
                 metadata: { shares, sharePrice }
             }), 'shareViaRepay');
+        }
+
+        // *** NEW: Interest portion -> record as income transaction for Profit ***
+        if ((split.interest || 0) > 0) {
+            const gen4 = await nextNumber('report.prefix');
+            await run(sb.from('transactions').insert({
+                txn_number: gen4, txn_type: 'loan_interest',
+                amount: split.interest, account_id: account?.id || null,
+                loan_id, member_id, borrower_id, sponsor_id,
+                reference: txn.txn_number,
+                description: 'Loan interest income (via repayment)',
+                category: 'loan_interest'
+            }), 'interestViaRepay');
         }
 
         return { txn, repayment };

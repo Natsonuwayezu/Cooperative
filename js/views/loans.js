@@ -58,14 +58,15 @@ ELF.router.register('loans', async (view, params) => {
             sponsors.forEach(s => nameMap[s.id] = { name: s.name, ref: s.sponsor_number, kind: 'Sponsor' });
 
             listEl.innerHTML = _.table([
-                { label: 'Loan #', render: r => `<a href="#loans/${r.id}" class="mono">${_.escapeHtml(r.loan_number)}</a>` },
                 {
                     label: 'Borrower', render: r => {
                         const id = r.member_id || r.borrower_id || r.sponsor_id;
                         const info = nameMap[id];
-                        return info
-                            ? `${_.escapeHtml(info.name)} <span class="badge brand" style="margin-left:6px">${info.kind}</span>`
-                            : '—';
+                        if (!info) return '—';
+                        return `
+              <div style="font-weight:600">${_.escapeHtml(info.name)}</div>
+              <div class="muted" style="font-size:11px">${info.kind}</div>
+            `;
                     }
                 },
                 { label: 'Issued', render: r => new Date(r.issue_date).toLocaleDateString() },
@@ -108,9 +109,9 @@ ELF.router.register('loans', async (view, params) => {
 
         const borrowerOptions = [
             { value: '', label: '— Select borrower —' },
-            ...members.map(m => ({ value: 'm:' + m.id, label: `Member — ${m.member_number} — ${m.full_name}` })),
-            ...borrowers.map(b => ({ value: 'b:' + b.id, label: `External — ${b.borrower_number} — ${b.name}` })),
-            ...sponsors.map(s => ({ value: 's:' + s.id, label: `Sponsor — ${s.sponsor_number} — ${s.name}` }))
+            ...members.map(m => ({ value: 'm:' + m.id, label: `${m.full_name}` })),
+            ...borrowers.map(b => ({ value: 'b:' + b.id, label: `${b.name} (External)` })),
+            ...sponsors.map(s => ({ value: 's:' + s.id, label: `${s.name} (Sponsor)` }))
         ];
 
         const schema = [
@@ -193,7 +194,7 @@ ELF.router.register('loans', async (view, params) => {
                         try {
                             const created = await db.createLoan(payload);
                             await audit.log('CREATE', 'loan', created.id, null, created, 'New loan issued');
-                            _.toast('Loan issued: ' + created.loan_number);
+                            _.toast('Loan issued successfully');
                             _.closeModal();
                             onDone && onDone();
                         } catch (e) { _.toast(e.message, 'error'); }
@@ -216,20 +217,20 @@ ELF.router.register('loans', async (view, params) => {
         let borrowerLabel = '—';
         if (loan.member_id) {
             const m = await db.getMember(loan.member_id);
-            borrowerLabel = `${m.full_name} (${m.member_number}) — Member`;
+            borrowerLabel = `${m.full_name}`;
         } else if (loan.borrower_id) {
             const r = await db.sb.from('borrowers').select('*').eq('id', loan.borrower_id).single().then(r => r.data);
-            borrowerLabel = `${r.name} (${r.borrower_number}) — External`;
+            borrowerLabel = `${r.name} (External)`;
         } else if (loan.sponsor_id) {
             const r = await db.sb.from('sponsors').select('*').eq('id', loan.sponsor_id).single().then(r => r.data);
-            borrowerLabel = `${r.name} (${r.sponsor_number}) — Sponsor`;
+            borrowerLabel = `${r.name} (Sponsor)`;
         }
 
         const bal = engine.computeLoanBalance(loan, interest, penalties, repayments);
         const overdue = engine.isOverdue(loan);
 
         view.innerHTML = `
-      ${_.pageHead('Loan ' + loan.loan_number, borrowerLabel, `
+      ${_.pageHead('Loan Details', borrowerLabel, `
         <button class="btn-ghost" id="act-interest">Charge Interest</button>
         <button class="btn-ghost" id="act-penalty">Add Penalty</button>
         <button class="btn-primary" id="act-repay">Record Repayment</button>
@@ -353,8 +354,6 @@ ELF.router.register('loans', async (view, params) => {
 
     // ---------- CHARGE INTEREST MODAL ----------
     function chargeInterestModal(loan, onDone) {
-        const [interest] = [null];
-        // We compute base as current outstanding principal + unpaid interest + penalties
         (async () => {
             const ints = await db.listLoanInterest(loan.id);
             const pens = await db.listLoanPenalties(loan.id);
@@ -367,7 +366,6 @@ ELF.router.register('loans', async (view, params) => {
             const months = engine.fullMonthsBetween(fromDate, today);
             const suggestedBase = bal.totalOutstanding;
             const suggestedRate = Number(loan.interest_rate_pct);
-            const suggestedAmount = engine.calcMonthlyInterest(suggestedBase, suggestedRate, Math.max(months, 1));
 
             const schema = [
                 { name: 'charge_date', label: 'Charge date', type: 'date', required: true, default: today.toISOString().slice(0, 10) },

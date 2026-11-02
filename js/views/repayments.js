@@ -4,7 +4,6 @@ ELF.router.register('repayments', async (view, params) => {
     const { ui, money, db, engine, audit } = ELF;
     const _ = ui;
 
-    // If no loan id, show a picker
     if (!params.id) return renderPicker(view);
     return renderRepayment(view, params.id);
 
@@ -14,21 +13,20 @@ ELF.router.register('repayments', async (view, params) => {
         const memberIds = rows.map(r => r.member_id).filter(Boolean);
         const borrowerIds = rows.map(r => r.borrower_id).filter(Boolean);
         const [members, borrowers] = await Promise.all([
-            memberIds.length ? db.sb.from('members').select('id,full_name,member_number').in('id', memberIds).then(r => r.data || []) : [],
-            borrowerIds.length ? db.sb.from('borrowers').select('id,name,borrower_number').in('id', borrowerIds).then(r => r.data || []) : []
+            memberIds.length ? db.sb.from('members').select('id,full_name').in('id', memberIds).then(r => r.data || []) : [],
+            borrowerIds.length ? db.sb.from('borrowers').select('id,name').in('id', borrowerIds).then(r => r.data || []) : []
         ]);
         const nameMap = {};
-        members.forEach(m => nameMap[m.id] = m.full_name + ' — ' + m.member_number);
-        borrowers.forEach(b => nameMap[b.id] = b.name + ' — ' + b.borrower_number + ' (external)');
+        members.forEach(m => nameMap[m.id] = m.full_name);
+        borrowers.forEach(b => nameMap[b.id] = b.name + ' (External)');
 
         view.innerHTML = `
       ${_.pageHead('Record Repayment', 'Pick an active loan to record a repayment against')}
       ${_.table([
-            { label: 'Loan #', render: r => `<a href="#repayments/${r.id}" class="mono">${_.escapeHtml(r.loan_number)}</a>` },
             {
                 label: 'Borrower', render: r => {
                     const id = r.member_id || r.borrower_id || r.sponsor_id;
-                    return _.escapeHtml(nameMap[id] || '—');
+                    return `<span style="font-weight:600">${_.escapeHtml(nameMap[id] || '—')}</span>`;
                 }
             },
             { label: 'Principal', align: 'right', render: r => money.fmt(r.principal) },
@@ -48,7 +46,12 @@ ELF.router.register('repayments', async (view, params) => {
         ]);
         const bal = engine.computeLoanBalance(loan, interest, penalties, repayments);
 
-        // Determine emergency due for this member this month
+        let borrowerName = '—';
+        if (loan.member_id) {
+            const m = await db.getMember(loan.member_id);
+            borrowerName = m.full_name;
+        }
+
         let emergencyDue = 0;
         if (loan.member_id) {
             const monthly = Number(ELF.settings['finance.emergency_monthly']) || 1000;
@@ -60,7 +63,7 @@ ELF.router.register('repayments', async (view, params) => {
         }
 
         view.innerHTML = `
-      ${_.pageHead('Repayment — ' + loan.loan_number, 'Total received will be allocated automatically', `
+      ${_.pageHead('Repayment', borrowerName, `
         <a class="btn-ghost" href="#loans/${loan.id}">Loan Details</a>
       `)}
 
@@ -89,6 +92,7 @@ ELF.router.register('repayments', async (view, params) => {
 
         const schema = [
             { name: 'total_received', label: 'Total Received (RWF)', type: 'number', required: true, placeholder: 'e.g. 25000' },
+            { name: 'include_emergency', label: 'Include 1,000 RWF Emergency Contribution', type: 'select', options: [{ value: 'yes', label: 'Yes, include' }, { value: 'no', label: 'No, already paid' }], default: emergencyDue > 0 ? 'yes' : 'no' },
             { name: 'payment_date', label: 'Payment date', type: 'date', required: true, default: new Date().toISOString().slice(0, 10) },
             {
                 name: 'method', label: 'Method', type: 'select', options: [
@@ -108,12 +112,15 @@ ELF.router.register('repayments', async (view, params) => {
             const d = form.read(formEl);
             const total = Number(d.total_received) || 0;
             if (!total) { previewEl.innerHTML = `<div class="muted">Enter amount to see allocation</div>`; return null; }
+
+            const emgAmt = d.include_emergency === 'yes' ? (Number(ELF.settings['finance.emergency_monthly']) || 1000) : 0;
+
             const buckets = {
-                emergency: emergencyDue,
+                emergency: emgAmt,
                 interest: bal.interestOutstanding,
                 penalty: bal.penaltyOutstanding,
                 principal: bal.principalOutstanding,
-                savings: 999999999   // unlimited
+                savings: 999999999
             };
             const split = engine.allocateRepayment(total, buckets);
             previewEl.innerHTML = `
@@ -124,7 +131,7 @@ ELF.router.register('repayments', async (view, params) => {
           <div class="row"><span>Penalty</span><strong>${money.fmt(split.penalty)}</strong></div>
           <div class="row"><span>Principal</span><strong>${money.fmt(split.principal)}</strong></div>
           <div class="row"><span>Savings (extra)</span><strong>${money.fmt(split.savings)}</strong></div>
-          <div class="row total"><span>Remaining after</span><strong>${money.fmt(Math.max(0, bal.totalOutstanding + emergencyDue - total))}</strong></div>
+          <div class="row total"><span>Remaining after</span><strong>${money.fmt(Math.max(0, bal.totalOutstanding + split.emergency - total))}</strong></div>
         </div>`;
             return split;
         }
@@ -138,8 +145,10 @@ ELF.router.register('repayments', async (view, params) => {
             const total = Number(d.total_received);
             if (!total || total <= 0) return _.toast('Amount must be > 0', 'error');
 
+            const emgAmt = d.include_emergency === 'yes' ? (Number(ELF.settings['finance.emergency_monthly']) || 1000) : 0;
+
             const buckets = {
-                emergency: emergencyDue,
+                emergency: emgAmt,
                 interest: bal.interestOutstanding,
                 penalty: bal.penaltyOutstanding,
                 principal: bal.principalOutstanding,
@@ -161,7 +170,6 @@ ELF.router.register('repayments', async (view, params) => {
                 });
                 await audit.log('CREATE', 'loan_repayment', res.txn.id, null, res.txn, 'Repayment recorded');
 
-                // Auto-complete loan if fully paid
                 const newInts = await db.listLoanInterest(loan.id);
                 const newPens = await db.listLoanPenalties(loan.id);
                 const newReps = await db.listLoanRepayments(loan.id);
@@ -170,11 +178,9 @@ ELF.router.register('repayments', async (view, params) => {
                     await db.updateLoanStatus(loan.id, 'COMPLETED');
                 }
 
-                _.toast('Repayment saved: ' + res.txn.txn_number);
-                // reset
+                _.toast('Repayment saved successfully');
                 formEl.querySelector('[name=total_received]').value = '';
                 formEl.querySelector('[name=notes]').value = '';
-                // reload
                 renderRepayment(view, loan.id);
             } catch (e) { _.toast(e.message, 'error'); }
         };

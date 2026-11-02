@@ -74,7 +74,7 @@ ELF.pdf = (function () {
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor(90, 100, 96);
-        if (period) doc.text('Period: ' + period, 14, 46);
+        if (period) doc.text('Period: ' + String(period).replace(/[^\x00-\x7F]/g, '-'), 14, 46);
         doc.text('Generated: ' + new Date().toLocaleString(), W - 14, 46, { align: 'right' });
 
         const ref = (s['report.prefix'] || 'ELF') + '-' + Date.now().toString().slice(-8);
