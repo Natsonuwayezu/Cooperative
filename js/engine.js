@@ -173,7 +173,8 @@ ELF.engine = (function () {
     function computeShareBalance(txns) {
         let shares = 0, savings = 0;
         for (const t of txns) {
-            if (t.txn_type !== 'member_contribution' && t.txn_type !== 'share_purchase') continue;
+            // Only count share_purchase rows to prevent double-counting
+            if (t.txn_type !== 'share_purchase') continue;
             const meta = t.metadata || {};
             shares += Math.round(meta.shares || 0);
             savings += Math.round(meta.savingsRemainder || 0);

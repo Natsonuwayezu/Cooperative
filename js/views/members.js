@@ -106,7 +106,6 @@ ELF.router.register('members', async (view, params) => {
   }
 
   // ---------- PROFILE ----------
-  // ---------- PROFILE ----------
   async function renderProfile(view, id) {
     const member = await db.getMember(id);
     const [periods, txns, loans] = await Promise.all([
@@ -210,7 +209,7 @@ ELF.router.register('members', async (view, params) => {
         </div>
       </div>
 
-      <div class="card mt-16">
+            <div class="card mt-16">
         <div class="card-title">Transaction History</div>
         <div class="mt-16">
           ${_.table([
@@ -218,7 +217,7 @@ ELF.router.register('members', async (view, params) => {
           { label: 'Type', render: r => _.badge(r.txn_type.replace(/_/g, ' '), 'brand') },
           { label: 'Description', render: r => _.escapeHtml(r.description || '—') },
           { label: 'Amount', align: 'right', render: r => money.fmt(r.amount) }
-        ], txns.slice().reverse(), { empty: 'No transactions yet' })}
+        ], txns.filter(t => t.txn_type !== 'share_purchase' && t.txn_type !== 'emergency_contribution').slice().reverse(), { empty: 'No transactions yet' })}
         </div>
       </div>
     `;

@@ -165,21 +165,19 @@ ELF.db = (function () {
             account_id: account ? account.id : null,
             member_id,
             reference: reference || null,
-            description: `Contribution: ${split.shares} share(s) + emergency ${split.emergency}`,
+            description: `Contribution received`,
             notes: notes || null,
             status: 'POSTED',
             metadata: {
-                shares: split.shares,
                 shareValue: split.shareValue,
                 emergency: split.emergency,
                 savingsRemainder: split.savingsRemainder,
                 sharePrice: split.sharePrice,
-                emergencyDue: split.emergencyDue,
                 method: method || 'cash'
             }
         });
 
-        // Split as separate ledger rows for clean reporting
+        // Emergency contribution
         if (split.emergency > 0) {
             const gen2 = await nextNumber('report.prefix');
             await run(sb.from('transactions').insert({
@@ -189,6 +187,8 @@ ELF.db = (function () {
                 description: 'Monthly emergency contribution'
             }), 'emergencyRow');
         }
+
+        // Share purchase (THIS is where shares are counted)
         if (split.shareValue > 0) {
             const gen3 = await nextNumber('report.prefix');
             await run(sb.from('transactions').insert({
@@ -317,7 +317,7 @@ ELF.db = (function () {
         return data;
     }
 
-        async function recordRepayment({ loan_id, member_id, borrower_id, sponsor_id, total_received, payment_date, method, split, notes }) {
+    async function recordRepayment({ loan_id, member_id, borrower_id, sponsor_id, total_received, payment_date, method, split, notes }) {
         const account = await getAccountByCode(methodToAccount(method));
         const gen = await nextNumber('report.prefix');
         const txn = await run(sb.from('transactions').insert({
@@ -505,20 +505,19 @@ ELF.db = (function () {
      *   - eligible_shares = shares purchased with txn_date <= period_end
      */
     async function buildEligibleMembers(periodStart, periodEnd) {
-        // 1. All members
         const { data: members } = await sb.from('members').select('id,member_number,full_name');
-        // 2. All participation periods
         const { data: periods } = await sb.from('member_participation_periods').select('*');
-        // 3. All share purchases up to period end
+
+        // ONLY look at share_purchase, not member_contribution
         const { data: shares } = await sb.from('transactions')
             .select('member_id,metadata,txn_date,txn_type,status')
-            .in('txn_type', ['share_purchase', 'member_contribution'])
+            .eq('txn_type', 'share_purchase')
             .lte('txn_date', periodEnd + 'T23:59:59');
 
         const ps = new Date(periodStart).getTime();
         const pe = new Date(periodEnd + 'T23:59:59').getTime();
 
-        const eligibleMap = new Map(); // member_id -> eligible_shares
+        const eligibleMap = new Map();
         for (const p of (periods || [])) {
             const s = new Date(p.start_date).getTime();
             const e = p.end_date ? new Date(p.end_date).getTime() : 9e15;
@@ -536,7 +535,7 @@ ELF.db = (function () {
 
         const eligible = [];
         for (const [member_id, eligible_shares] of eligibleMap.entries()) {
-            if (eligible_shares <= 0) continue; // no shares => no allocation
+            if (eligible_shares <= 0) continue;
             const m = members.find(x => x.id === member_id);
             eligible.push({
                 member_id,
