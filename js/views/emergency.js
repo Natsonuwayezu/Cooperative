@@ -6,8 +6,8 @@ ELF.router.register('emergency', async (view) => {
 
     // Load all emergency transactions
     const [contribs, assist] = await Promise.all([
-        db.sb.from('transactions').select('*').eq('txn_type', 'emergency_contribution').order('txn_date', { ascending: false }).then(r => r.data || []),
-        db.sb.from('transactions').select('*').eq('txn_type', 'emergency_assistance').order('txn_date', { ascending: false }).then(r => r.data || [])
+        db.sb.from('transactions').select('*, members(full_name, member_number)').eq('txn_type', 'emergency_contribution').order('txn_date', { ascending: false }).then(r => r.data || []),
+        db.sb.from('transactions').select('*, members(full_name, member_number)').eq('txn_type', 'emergency_assistance').order('txn_date', { ascending: false }).then(r => r.data || [])
     ]);
     const totalIn = contribs.reduce((a, t) => a + Number(t.amount), 0);
     const totalOut = assist.reduce((a, t) => a + Number(t.amount), 0);
@@ -104,7 +104,7 @@ ELF.router.register('emergency', async (view) => {
         const schema = [
             {
                 name: 'member_id', label: 'Member', type: 'select', required: true, full: true,
-                options: actives.length ? actives.map(m => ({ value: m.id, label: `${m.member_number} — ${m.full_name}` }))
+                options: actives.length ? actives.map(m => ({ value: m.id, label: `${m.full_name}` }))
                     : [{ value: '', label: 'No active members' }]
             },
             { name: 'amount', label: 'Amount (RWF)', type: 'number', required: true },
@@ -125,6 +125,11 @@ ELF.router.register('emergency', async (view) => {
                         const d = form.read(body);
                         const errs = _.validateRequired(d, schema);
                         if (Object.keys(errs).length) return _.toast('Complete required fields', 'error');
+
+                        if (Number(d.amount) > balance) {
+                            return _.toast('Amount exceeds available emergency balance!', 'error');
+                        }
+
                         try {
                             const rec = await db.recordEmergencyAssistance({ ...d, amount: Number(d.amount) });
                             await audit.log('CREATE', 'emergency_assistance', rec.id, null, rec, 'Assistance paid');

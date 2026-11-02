@@ -231,7 +231,8 @@ ELF.router.register('loans', async (view, params) => {
 
         view.innerHTML = `
       ${_.pageHead('Loan Details', borrowerLabel, `
-        <button class="btn-ghost" id="act-interest">Charge Interest</button>
+                <button class="btn-ghost" id="act-compound">Auto-Charge Compound Interest</button>
+        <button class="btn-ghost" id="act-interest">Charge Manual Interest</button>
         <button class="btn-ghost" id="act-penalty">Add Penalty</button>
         <button class="btn-primary" id="act-repay">Record Repayment</button>
         ${loan.status === 'ACTIVE' ? `<button class="btn-success" id="act-close">Mark Completed</button>` : ''}
@@ -335,8 +336,18 @@ ELF.router.register('loans', async (view, params) => {
         </div>`;
         }
 
-        // Actions
-        _.$('#act-interest').onclick = () => chargeInterestModal(loan, () => renderDetail(view, id));
+            // Actions
+    _. $ ('#act-compound').onclick = async () => {
+      const ok = await _.confirm('This will calculate all unpaid interest for the months passed, compound it, and add it to the ledger. Continue?', { okLabel: 'Charge' });
+      if (!ok) return;
+      try {
+        await db.sb.rpc('compound_loan_interest', { p_loan_id: loan.id });
+        _.toast('Compound interest charged successfully');
+        renderDetail(view, id);
+      } catch (e) { _.toast(e.message, 'error'); }
+    };
+
+    _. $ ('#act-interest').onclick = () => chargeInterestModal(loan, () => renderDetail(view, id));
         _.$('#act-penalty').onclick = () => chargePenaltyModal(loan, () => renderDetail(view, id));
         _.$('#act-repay').onclick = () => { location.hash = 'repayments/' + id; };
         const closeBtn = _.$('#act-close');
