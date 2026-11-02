@@ -127,8 +127,7 @@ ELF.router.register('loans', async (view, params) => {
                 name: 'disbursement_method', label: 'Disbursement method', type: 'select',
                 options: [
                     { value: 'airtel', label: 'Airtel Money (20 RWF fee)' },
-                    { value: 'cash', label: 'Cash' },
-                    { value: 'bank', label: 'Bank Transfer' }
+                    { value: 'cash', label: 'Cash' }
                 ]
             },
             { name: 'notes', label: 'Notes', type: 'textarea', full: true }

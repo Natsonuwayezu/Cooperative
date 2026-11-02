@@ -63,8 +63,7 @@ ELF.router.register('income', async (view) => {
         {
             name: 'method', label: 'Method', type: 'select', options: [
                 { value: 'airtel', label: 'Airtel Money' },
-                { value: 'cash', label: 'Cash' },
-                { value: 'bank', label: 'Bank Transfer' }
+                { value: 'cash', label: 'Cash' }
             ]
         },
         { name: 'reference', label: 'Reference' },

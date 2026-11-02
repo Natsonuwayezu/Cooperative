@@ -7,8 +7,7 @@ ELF.router.register('contributions', async (view) => {
   const members = await db.listMembers({ status: 'ACTIVE', pageSize: 500 }).then(r => r.rows);
   const methods = [
     { value: 'airtel', label: 'Airtel Money' },
-    { value: 'cash', label: 'Cash' },
-    { value: 'bank', label: 'Bank Transfer' }
+    { value: 'cash', label: 'Cash' }
   ];
 
   view.innerHTML = `
