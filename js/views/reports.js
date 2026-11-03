@@ -4,21 +4,17 @@ ELF.router.register('reports', async (view, params) => {
     const { ui, money, db, pdf } = ELF;
     const _ = ui;
 
-    // =====================================================
-    // REPORT DEFINITIONS — declared FIRST so nothing can
-    // reference REPORTS before it's initialized.
-    // =====================================================
     const REPORTS = {
+        // ---- MEMBERSHIP ----
         member_register: {
             title: 'Member Register', desc: 'All registered members', hasRange: false,
             run: async () => {
                 const { data } = await db.sb.from('members').select('*').order('member_number');
                 return {
                     columns: [
-                        { header: 'Member #', dataKey: 'member_number', mono: true },
-                        { header: 'Full name', dataKey: 'full_name' },
+                        { header: 'Name', dataKey: 'full_name' },
                         { header: 'Phone', dataKey: 'phone' },
-                        { header: 'Registered', dataKey: 'reg', align: 'left' },
+                        { header: 'Registered', dataKey: 'reg' },
                         { header: 'Status', dataKey: 'status' }
                     ],
                     rows: (data || []).map(m => ({ ...m, reg: new Date(m.registration_date).toLocaleDateString() })),
@@ -32,8 +28,7 @@ ELF.router.register('reports', async (view, params) => {
                 const { data } = await db.sb.from('members').select('*').eq('status', 'ACTIVE').order('member_number');
                 return {
                     columns: [
-                        { header: 'Member #', dataKey: 'member_number', mono: true },
-                        { header: 'Full name', dataKey: 'full_name' },
+                        { header: 'Name', dataKey: 'full_name' },
                         { header: 'Phone', dataKey: 'phone' },
                         { header: 'Registered', dataKey: 'reg' }
                     ],
@@ -48,8 +43,7 @@ ELF.router.register('reports', async (view, params) => {
                 const { data } = await db.sb.from('members').select('*').eq('status', 'DEACTIVATED').order('member_number');
                 return {
                     columns: [
-                        { header: 'Member #', dataKey: 'member_number', mono: true },
-                        { header: 'Full name', dataKey: 'full_name' },
+                        { header: 'Name', dataKey: 'full_name' },
                         { header: 'Phone', dataKey: 'phone' }
                     ],
                     rows: data || [], summary: [{ label: 'Deactivated', value: (data || []).length }]
@@ -59,17 +53,15 @@ ELF.router.register('reports', async (view, params) => {
         participation_periods: {
             title: 'Participation Periods', desc: 'Every membership cycle', hasRange: false,
             run: async () => {
-                const { data } = await db.sb.from('member_participation_periods').select('*, members(full_name, member_number)').order('start_date');
+                const { data } = await db.sb.from('member_participation_periods').select('*, members(full_name)').order('start_date');
                 return {
                     columns: [
-                        { header: 'Member #', dataKey: 'num', mono: true },
                         { header: 'Name', dataKey: 'name' },
                         { header: 'Start', dataKey: 'start' },
                         { header: 'End', dataKey: 'end' },
                         { header: 'Reason', dataKey: 'reason' }
                     ],
                     rows: (data || []).map(p => ({
-                        num: p.members?.member_number,
                         name: p.members?.full_name,
                         start: new Date(p.start_date).toLocaleDateString(),
                         end: p.end_date ? new Date(p.end_date).toLocaleDateString() : 'Current',
@@ -79,41 +71,30 @@ ELF.router.register('reports', async (view, params) => {
             }
         },
 
-        // ---- FIXED: only share_purchase, not member_contribution ----
+        // ---- SHARES & SAVINGS ----
         share_register: {
             title: 'Share Register', desc: 'Every share purchase', hasRange: true,
             run: async ({ from, to }) => {
-                let q = db.sb.from('transactions')
-                    .select('*, members(full_name, member_number)')
-                    .eq('txn_type', 'share_purchase')
-                    .order('txn_date');
+                let q = db.sb.from('transactions').select('*, members(full_name)').eq('txn_type', 'share_purchase').order('txn_date');
                 if (from) q = q.gte('txn_date', from);
                 if (to) q = q.lte('txn_date', to + 'T23:59:59');
-                const { data, error } = await q;
-                if (error) throw error;
+                const { data } = await q;
                 let totalShares = 0, totalValue = 0;
-                const rows = (data || [])
-                    .filter(t => t.status !== 'REVERSED')
-                    .map(t => {
-                        const shares = Number(t.metadata?.shares || 0);
-                        const sp = Number(t.metadata?.sharePrice || ELF.settings['finance.share_price'] || 0);
-                        const value = shares * sp;
-                        totalShares += shares;
-                        totalValue += value;
-                        return {
-                            date: new Date(t.txn_date).toLocaleDateString(),
-                            num: t.txn_number,
-                            member: t.members?.member_number || '',
-                            name: t.members?.full_name || '',
-                            shares,
-                            value: money.fmt(value, false)
-                        };
-                    });
+                const rows = (data || []).filter(t => t.status !== 'REVERSED').map(t => {
+                    const shares = Number(t.metadata?.shares || 0);
+                    const sp = Number(t.metadata?.sharePrice || 5000);
+                    const value = shares * sp;
+                    totalShares += shares;
+                    totalValue += value;
+                    return {
+                        date: new Date(t.txn_date).toLocaleDateString(),
+                        name: t.members?.full_name || '',
+                        shares, value: money.fmt(value, false)
+                    };
+                });
                 return {
                     columns: [
                         { header: 'Date', dataKey: 'date' },
-                        { header: 'Txn #', dataKey: 'num', mono: true },
-                        { header: 'Member #', dataKey: 'member' },
                         { header: 'Name', dataKey: 'name' },
                         { header: 'Shares', dataKey: 'shares', align: 'right' },
                         { header: 'Value (RWF)', dataKey: 'value', align: 'right' }
@@ -126,38 +107,24 @@ ELF.router.register('reports', async (view, params) => {
                 };
             }
         },
-
-        // ---- FIXED: only share_purchase, not member_contribution ----
         member_share_balances: {
             title: 'Member Share Balances', desc: 'Current shares per member', hasRange: false,
             run: async () => {
-                const { data, error } = await db.sb.from('transactions')
-                    .select('member_id, metadata, txn_type, status, members(full_name, member_number, status)')
-                    .eq('txn_type', 'share_purchase');
-                if (error) throw error;
+                const { data } = await db.sb.from('transactions').select('member_id, metadata, members(full_name)').eq('txn_type', 'share_purchase').neq('status', 'REVERSED');
                 const map = {};
                 for (const t of (data || [])) {
-                    if (t.status === 'REVERSED' || !t.member_id) continue;
+                    if (!t.member_id) continue;
                     const sh = Number(t.metadata?.shares || 0);
                     if (sh <= 0) continue;
-                    map[t.member_id] = map[t.member_id] || {
-                        name: t.members?.full_name,
-                        num: t.members?.member_number,
-                        status: t.members?.status,
-                        shares: 0
-                    };
+                    map[t.member_id] = map[t.member_id] || { name: t.members?.full_name, shares: 0 };
                     map[t.member_id].shares += sh;
                 }
                 const sp = Number(ELF.settings['finance.share_price'] || 0);
-                const rows = Object.values(map)
-                    .sort((a, b) => b.shares - a.shares)
-                    .map(r => ({ ...r, value: money.fmt(r.shares * sp, false) }));
+                const rows = Object.values(map).sort((a, b) => b.shares - a.shares).map(r => ({ name: r.name, shares: r.shares, value: money.fmt(r.shares * sp, false) }));
                 const totalShares = rows.reduce((a, r) => a + r.shares, 0);
                 return {
                     columns: [
-                        { header: 'Member #', dataKey: 'num' },
                         { header: 'Name', dataKey: 'name' },
-                        { header: 'Status', dataKey: 'status' },
                         { header: 'Shares', dataKey: 'shares', align: 'right' },
                         { header: 'Value (RWF)', dataKey: 'value', align: 'right' }
                     ],
@@ -169,12 +136,10 @@ ELF.router.register('reports', async (view, params) => {
                 };
             }
         },
-
         contribution_register: {
             title: 'Contribution Register', desc: 'All member contributions', hasRange: true,
             run: async ({ from, to }) => {
-                let q = db.sb.from('transactions').select('*, members(full_name, member_number)')
-                    .eq('txn_type', 'member_contribution').order('txn_date');
+                let q = db.sb.from('transactions').select('*, members(full_name)').eq('txn_type', 'member_contribution').order('txn_date');
                 if (from) q = q.gte('txn_date', from);
                 if (to) q = q.lte('txn_date', to + 'T23:59:59');
                 const { data } = await q;
@@ -183,22 +148,14 @@ ELF.router.register('reports', async (view, params) => {
                     total += Number(t.amount);
                     return {
                         date: new Date(t.txn_date).toLocaleDateString(),
-                        num: t.txn_number,
-                        member: t.members?.member_number,
                         name: t.members?.full_name,
-                        shares: t.metadata?.shares || 0,
-                        emergency: t.metadata?.emergency || 0,
                         amount: money.fmt(t.amount, false)
                     };
                 });
                 return {
                     columns: [
                         { header: 'Date', dataKey: 'date' },
-                        { header: 'Txn #', dataKey: 'num', mono: true },
-                        { header: 'Member #', dataKey: 'member' },
                         { header: 'Name', dataKey: 'name' },
-                        { header: 'Shares', dataKey: 'shares', align: 'right' },
-                        { header: 'Emergency', dataKey: 'emergency', align: 'right' },
                         { header: 'Amount (RWF)', dataKey: 'amount', align: 'right' }
                     ],
                     rows, summary: [{ label: 'Total received', value: money.fmt(total) }]
@@ -206,11 +163,11 @@ ELF.router.register('reports', async (view, params) => {
             }
         },
 
+        // ---- EMERGENCY ----
         emergency_contributions: {
             title: 'Emergency Contribution Register', desc: 'Monthly contributions', hasRange: true,
             run: async ({ from, to }) => {
-                let q = db.sb.from('transactions').select('*, members(full_name, member_number)')
-                    .eq('txn_type', 'emergency_contribution').order('txn_date');
+                let q = db.sb.from('transactions').select('*, members(full_name)').eq('txn_type', 'emergency_contribution').order('txn_date');
                 if (from) q = q.gte('txn_date', from);
                 if (to) q = q.lte('txn_date', to + 'T23:59:59');
                 const { data } = await q;
@@ -219,8 +176,6 @@ ELF.router.register('reports', async (view, params) => {
                     total += Number(t.amount);
                     return {
                         date: new Date(t.txn_date).toLocaleDateString(),
-                        num: t.txn_number,
-                        member: t.members?.member_number,
                         name: t.members?.full_name,
                         amount: money.fmt(t.amount, false)
                     };
@@ -228,8 +183,6 @@ ELF.router.register('reports', async (view, params) => {
                 return {
                     columns: [
                         { header: 'Date', dataKey: 'date' },
-                        { header: 'Txn #', dataKey: 'num', mono: true },
-                        { header: 'Member #', dataKey: 'member' },
                         { header: 'Name', dataKey: 'name' },
                         { header: 'Amount (RWF)', dataKey: 'amount', align: 'right' }
                     ],
@@ -237,21 +190,14 @@ ELF.router.register('reports', async (view, params) => {
                 };
             }
         },
-
         emergency_balances: {
             title: 'Member Emergency Balances', desc: 'Per-member emergency fund', hasRange: false,
             run: async () => {
-                const { data } = await db.sb.from('transactions')
-                    .select('member_id, amount, txn_type, status, members(full_name, member_number)')
-                    .in('txn_type', ['emergency_contribution', 'emergency_assistance']);
+                const { data } = await db.sb.from('transactions').select('member_id, amount, txn_type, status, members(full_name)').in('txn_type', ['emergency_contribution', 'emergency_assistance']);
                 const map = {};
                 for (const t of (data || [])) {
                     if (t.status === 'REVERSED' || !t.member_id) continue;
-                    map[t.member_id] = map[t.member_id] || {
-                        num: t.members?.member_number,
-                        name: t.members?.full_name,
-                        in: 0, out: 0
-                    };
+                    map[t.member_id] = map[t.member_id] || { name: t.members?.full_name, in: 0, out: 0 };
                     if (t.txn_type === 'emergency_contribution') map[t.member_id].in += Number(t.amount);
                     else map[t.member_id].out += Number(t.amount);
                 }
@@ -263,7 +209,6 @@ ELF.router.register('reports', async (view, params) => {
                 })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
                 return {
                     columns: [
-                        { header: 'Member #', dataKey: 'num' },
                         { header: 'Name', dataKey: 'name' },
                         { header: 'Contributed', dataKey: 'contributed', align: 'right' },
                         { header: 'Assistance received', dataKey: 'out', align: 'right' },
@@ -277,11 +222,10 @@ ELF.router.register('reports', async (view, params) => {
                 };
             }
         },
-
         emergency_assistance: {
             title: 'Emergency Assistance Report', desc: 'Approved payouts', hasRange: true,
             run: async ({ from, to }) => {
-                let q = db.sb.from('emergency_assistance').select('*, members(full_name, member_number)').order('assistance_date');
+                let q = db.sb.from('emergency_assistance').select('*, members(full_name)').order('assistance_date');
                 if (from) q = q.gte('assistance_date', from);
                 if (to) q = q.lte('assistance_date', to);
                 const { data } = await q;
@@ -290,7 +234,6 @@ ELF.router.register('reports', async (view, params) => {
                     total += Number(a.amount);
                     return {
                         date: new Date(a.assistance_date).toLocaleDateString(),
-                        member: a.members?.member_number,
                         name: a.members?.full_name,
                         amount: money.fmt(a.amount, false),
                         reason: a.reason
@@ -299,7 +242,6 @@ ELF.router.register('reports', async (view, params) => {
                 return {
                     columns: [
                         { header: 'Date', dataKey: 'date' },
-                        { header: 'Member #', dataKey: 'member' },
                         { header: 'Name', dataKey: 'name' },
                         { header: 'Reason', dataKey: 'reason' },
                         { header: 'Amount (RWF)', dataKey: 'amount', align: 'right' }
@@ -309,25 +251,24 @@ ELF.router.register('reports', async (view, params) => {
             }
         },
 
+        // ---- LOANS ----
         loan_register: {
             title: 'Loan Register', desc: 'All loans', hasRange: false,
             run: async () => {
-                const { data } = await db.sb.from('loans').select('*').order('issue_date', { ascending: false });
+                const { data } = await db.sb.from('loans').select('*, members(full_name)').order('issue_date', { ascending: false });
                 return {
                     columns: [
-                        { header: 'Loan #', dataKey: 'loan_number', mono: true },
+                        { header: 'Name', dataKey: 'name' },
                         { header: 'Issued', dataKey: 'issued' },
                         { header: 'Principal', dataKey: 'principal', align: 'right' },
                         { header: 'Rate', dataKey: 'rate', align: 'right' },
-                        { header: 'Due', dataKey: 'due' },
                         { header: 'Status', dataKey: 'status' }
                     ],
                     rows: (data || []).map(l => ({
-                        loan_number: l.loan_number,
+                        name: l.members?.full_name || 'External',
                         issued: new Date(l.issue_date).toLocaleDateString(),
                         principal: money.fmt(l.principal, false),
                         rate: Number(l.interest_rate_pct).toFixed(2) + '%',
-                        due: l.expected_due_date ? new Date(l.expected_due_date).toLocaleDateString() : '—',
                         status: l.status
                     })),
                     summary: [{ label: 'Total loans', value: (data || []).length }]
@@ -337,16 +278,16 @@ ELF.router.register('reports', async (view, params) => {
         active_loans: {
             title: 'Active Loans', desc: 'Currently open', hasRange: false,
             run: async () => {
-                const { data } = await db.sb.from('loans').select('*').eq('status', 'ACTIVE').order('issue_date');
+                const { data } = await db.sb.from('loans').select('*, members(full_name)').eq('status', 'ACTIVE').order('issue_date');
                 return {
                     columns: [
-                        { header: 'Loan #', dataKey: 'loan_number', mono: true },
+                        { header: 'Name', dataKey: 'name' },
                         { header: 'Issued', dataKey: 'issued' },
                         { header: 'Principal', dataKey: 'principal', align: 'right' },
                         { header: 'Rate', dataKey: 'rate', align: 'right' }
                     ],
                     rows: (data || []).map(l => ({
-                        loan_number: l.loan_number,
+                        name: l.members?.full_name || 'External',
                         issued: new Date(l.issue_date).toLocaleDateString(),
                         principal: money.fmt(l.principal, false),
                         rate: Number(l.interest_rate_pct).toFixed(2) + '%'
@@ -362,16 +303,16 @@ ELF.router.register('reports', async (view, params) => {
             title: 'Overdue Loans', desc: 'Past expected due date', hasRange: false,
             run: async () => {
                 const today = new Date().toISOString().slice(0, 10);
-                const { data } = await db.sb.from('loans').select('*').eq('status', 'ACTIVE').lt('expected_due_date', today).order('expected_due_date');
+                const { data } = await db.sb.from('loans').select('*, members(full_name)').eq('status', 'ACTIVE').lt('expected_due_date', today).order('expected_due_date');
                 return {
                     columns: [
-                        { header: 'Loan #', dataKey: 'loan_number', mono: true },
+                        { header: 'Name', dataKey: 'name' },
                         { header: 'Issued', dataKey: 'issued' },
                         { header: 'Due', dataKey: 'due' },
                         { header: 'Principal', dataKey: 'principal', align: 'right' }
                     ],
                     rows: (data || []).map(l => ({
-                        loan_number: l.loan_number,
+                        name: l.members?.full_name || 'External',
                         issued: new Date(l.issue_date).toLocaleDateString(),
                         due: new Date(l.expected_due_date).toLocaleDateString(),
                         principal: money.fmt(l.principal, false)
@@ -383,15 +324,15 @@ ELF.router.register('reports', async (view, params) => {
         completed_loans: {
             title: 'Completed Loans', desc: 'Fully repaid', hasRange: false,
             run: async () => {
-                const { data } = await db.sb.from('loans').select('*').eq('status', 'COMPLETED').order('issue_date', { ascending: false });
+                const { data } = await db.sb.from('loans').select('*, members(full_name)').eq('status', 'COMPLETED').order('issue_date', { ascending: false });
                 return {
                     columns: [
-                        { header: 'Loan #', dataKey: 'loan_number', mono: true },
+                        { header: 'Name', dataKey: 'name' },
                         { header: 'Issued', dataKey: 'issued' },
                         { header: 'Principal', dataKey: 'principal', align: 'right' }
                     ],
                     rows: (data || []).map(l => ({
-                        loan_number: l.loan_number,
+                        name: l.members?.full_name || 'External',
                         issued: new Date(l.issue_date).toLocaleDateString(),
                         principal: money.fmt(l.principal, false)
                     })),
@@ -490,6 +431,7 @@ ELF.router.register('reports', async (view, params) => {
             }
         },
 
+        // ---- FINANCE ----
         cashbook: {
             title: 'Cashbook', desc: 'Chronological ledger', hasRange: true, orientation: 'landscape',
             run: async ({ from, to }) => {
@@ -523,15 +465,14 @@ ELF.router.register('reports', async (view, params) => {
                         { header: 'Balance', dataKey: 'balance', align: 'right' }
                     ],
                     rows,
-                    summary: [{ label: 'Ending running balance', value: money.fmt(total) }],
-                    notes: 'Running balance is informational. Refer to Financial Position for authoritative figures.'
+                    summary: [{ label: 'Ending running balance', value: money.fmt(total) }]
                 };
             }
         },
         airtel_ledger: {
             title: 'Airtel Money Ledger', desc: 'All Airtel transactions', hasRange: true,
             run: async ({ from, to }) => {
-                let q = db.sb.from('transactions').select('*, financial_accounts(code,name)').order('txn_date');
+                let q = db.sb.from('transactions').select('*, financial_accounts(code)').order('txn_date');
                 if (from) q = q.gte('txn_date', from);
                 if (to) q = q.lte('txn_date', to + 'T23:59:59');
                 const { data } = await q;
@@ -614,10 +555,9 @@ ELF.router.register('reports', async (view, params) => {
         financial_position: {
             title: 'Financial Position', desc: 'Snapshot of assets, liabilities, and funds', hasRange: false,
             run: async () => {
-                const { data: txns } = await db.sb.from('transactions').select('txn_type,amount,status');
+                const { data: txns } = await db.sb.from('transactions').select('txn_type,amount,status').neq('status', 'REVERSED');
                 let shareCapital = 0, emergencyIn = 0, emergencyOut = 0, income = 0, expenses = 0;
                 for (const t of (txns || [])) {
-                    if (t.status === 'REVERSED') continue;
                     const amt = Number(t.amount) || 0;
                     switch (t.txn_type) {
                         case 'share_purchase': shareCapital += amt; break;
@@ -639,10 +579,7 @@ ELF.router.register('reports', async (view, params) => {
                 const liquid = shareCapital + emergencyFund + distributable - outstanding;
 
                 return {
-                    columns: [
-                        { header: 'Item', dataKey: 'item' },
-                        { header: 'Amount', dataKey: 'amount', align: 'right' }
-                    ],
+                    columns: [{ header: 'Item', dataKey: 'item' }, { header: 'Amount', dataKey: 'amount', align: 'right' }],
                     rows: [
                         { item: 'Member share capital', amount: money.fmt(shareCapital) },
                         { item: 'Emergency fund', amount: money.fmt(emergencyFund) },
@@ -651,29 +588,22 @@ ELF.router.register('reports', async (view, params) => {
                         { item: 'Total income', amount: money.fmt(income) },
                         { item: 'Total expenses', amount: money.fmt(expenses) },
                         { item: 'Net position', amount: money.fmt(liquid) }
-                    ],
-                    summary: [
-                        { label: 'Liquid balance (approx.)', value: money.fmt(liquid) },
-                        { label: 'Share capital', value: money.fmt(shareCapital) },
-                        { label: 'Emergency fund', value: money.fmt(emergencyFund) },
-                        { label: 'Outstanding loans', value: money.fmt(outstanding) }
-                    ],
-                    notes: 'Derived from the ledger. Review Cashbook for authoritative cash movements.'
+                    ]
                 };
             }
         },
 
+        // ---- PROFIT ----
         profit_periods: {
             title: 'Profit Period Report', desc: 'All profit periods', hasRange: false,
             run: async () => {
                 const periods = await db.listProfitPeriods();
                 return {
                     columns: [
-                        { header: 'Period #', dataKey: 'num', mono: true },
+                        { header: 'Period', dataKey: 'num', mono: true },
                         { header: 'From', dataKey: 'from' },
                         { header: 'To', dataKey: 'to' },
                         { header: 'Income', dataKey: 'income', align: 'right' },
-                        { header: 'Expenses', dataKey: 'exp', align: 'right' },
                         { header: 'Distributable', dataKey: 'dist', align: 'right' },
                         { header: 'Status', dataKey: 'status' }
                     ],
@@ -682,7 +612,6 @@ ELF.router.register('reports', async (view, params) => {
                         from: new Date(p.period_start).toLocaleDateString(),
                         to: new Date(p.period_end).toLocaleDateString(),
                         income: money.fmt(p.total_income, false),
-                        exp: money.fmt(p.total_expenses, false),
                         dist: money.fmt(p.distributable_profit, false),
                         status: p.status
                     })),
@@ -699,41 +628,37 @@ ELF.router.register('reports', async (view, params) => {
                 }
                 const latest = periods.sort((a, b) => new Date(b.period_end) - new Date(a.period_end))[0];
                 const allocs = await db.listProfitAllocations(latest.id);
-                const { data: members } = await db.sb.from('members').select('id, full_name, member_number');
+                const { data: members } = await db.sb.from('members').select('id, full_name');
                 const mMap = {};
                 (members || []).forEach(m => mMap[m.id] = m);
                 let totalAlloc = 0;
                 const rows = allocs.map(a => {
                     totalAlloc += Number(a.allocated_profit);
                     return {
-                        num: mMap[a.member_id]?.member_number || '',
                         name: mMap[a.member_id]?.full_name || '',
                         shares: Number(a.eligible_shares).toLocaleString(),
                         pct: (Number(a.ownership_pct) * 100).toFixed(4) + '%',
-                        profit: money.fmt(a.allocated_profit, false),
-                        rounding: a.rounding_adjustment ? money.fmt(a.rounding_adjustment, false) : '—'
+                        profit: money.fmt(a.allocated_profit, false)
                     };
                 });
                 return {
                     columns: [
-                        { header: 'Member #', dataKey: 'num' },
                         { header: 'Name', dataKey: 'name' },
                         { header: 'Eligible shares', dataKey: 'shares', align: 'right' },
                         { header: 'Ownership', dataKey: 'pct', align: 'right' },
-                        { header: 'Allocated profit', dataKey: 'profit', align: 'right' },
-                        { header: 'Rounding', dataKey: 'rounding', align: 'right' }
+                        { header: 'Allocated profit', dataKey: 'profit', align: 'right' }
                     ],
                     rows,
                     summary: [
                         { label: 'Period', value: latest.period_number },
                         { label: 'Distributable', value: money.fmt(latest.distributable_profit) },
-                        { label: 'Total allocated', value: money.fmt(totalAlloc) },
-                        { label: 'Rounding difference', value: money.fmt(latest.rounding_difference) }
+                        { label: 'Total allocated', value: money.fmt(totalAlloc) }
                     ]
                 };
             }
         },
 
+        // ---- AUDIT ----
         audit_log: {
             title: 'Audit Log', desc: 'Every change ever made', hasRange: true, orientation: 'landscape',
             run: async ({ from, to }) => {
@@ -751,19 +676,226 @@ ELF.router.register('reports', async (view, params) => {
                     ],
                     rows: (data || []).map(a => ({
                         when: new Date(a.created_at).toLocaleString(),
-                        action: a.action,
-                        record: a.record_type,
+                        action: a.action, record: a.record_type,
                         id: (a.record_id || '').slice(0, 8),
                         reason: (a.reason || '').slice(0, 80)
                     })),
                     summary: [{ label: 'Entries shown', value: (data || []).length }]
                 };
             }
+        },
+
+        // =====================================================
+        // THE MASTER LEDGER (MONTHLY MATRIX)
+        // =====================================================
+        master_ledger: {
+            title: 'Master Monthly Ledger',
+            desc: 'All members (rows) by month (columns) with cash flow at the bottom',
+            hasRange: false,
+            orientation: 'landscape',
+            run: async () => {
+                // 1. Fetch data
+                const [members, txns] = await Promise.all([
+                    db.sb.from('members').select('id, full_name, registration_date, status').order('full_name').then(r => r.data || []),
+                    db.sb.from('transactions').select('*').neq('status', 'REVERSED').then(r => r.data || [])
+                ]);
+
+                // 2. Determine months (YYYY-MM)
+                const monthSet = new Set();
+                txns.forEach(t => monthSet.add(t.txn_date.slice(0, 7)));
+                const months = Array.from(monthSet).sort();
+
+                // 3. Build Nested Columns
+                const columns = [
+                    { header: 'Name', dataKey: 'name', rowSpan: 2 },
+                    { header: 'Joined', dataKey: 'joined', rowSpan: 2 }
+                ];
+
+                months.forEach(m => {
+                    const label = new Date(m + '-01').toLocaleString('default', { month: 'short', year: 'numeric' });
+                    columns.push(
+                        { header: 'Shares', dataKey: `sh_${m}`, align: 'right', group: label },
+                        { header: 'Emerg', dataKey: `em_${m}`, align: 'right', group: label },
+                        { header: 'Amount', dataKey: `amt_${m}`, align: 'right', group: label },
+                        { header: 'Tot', dataKey: `tot_${m}`, align: 'right', group: label }
+                    );
+                });
+
+                columns.push(
+                    { header: 'Shares', dataKey: 't_sh', align: 'right', group: 'TOTAL' },
+                    { header: 'Emerg', dataKey: 't_em', align: 'right', group: 'TOTAL' },
+                    { header: 'Amount', dataKey: 't_amt', align: 'right', group: 'TOTAL' },
+                    { header: 'Tot', dataKey: 't_tot', align: 'right', group: 'TOTAL' }
+                );
+
+                // 4. Build Rows
+                const rows = [];
+
+                // --- A. OPENING BALANCE ROW ---
+                // Filled per month after the rollover below (each month opens with the previous close)
+                const openingRow = { name: 'Opening Balance', joined: '' };
+                columns.forEach(c => { if (!['name', 'joined'].includes(c.dataKey)) openingRow[c.dataKey] = ''; });
+                rows.push(openingRow);
+
+                // --- B. MEMBER ROWS ---
+                const activeMembers = members.filter(m => m.status === 'ACTIVE');
+                let g_sh = 0, g_em = 0, g_amt = 0, g_tot = 0;
+
+                activeMembers.forEach(m => {
+                    const row = { name: m.full_name, joined: new Date(m.registration_date).toLocaleDateString() };
+                    let m_sh = 0, m_em = 0, m_amt = 0, m_tot = 0;
+
+                    months.forEach(month => {
+                        const mTxns = txns.filter(t => t.member_id === m.id && t.txn_date.startsWith(month));
+                        const shareCount = mTxns.filter(t => t.txn_type === 'share_purchase').reduce((a, t) => a + Number(t.metadata?.shares || 0), 0);
+                        const emerg = mTxns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0);
+                        const amt = mTxns.filter(t => t.txn_type === 'share_purchase').reduce((a, t) => a + Number(t.amount), 0);
+                        const tot = emerg + amt;
+
+                        row[`sh_${month}`] = shareCount ? shareCount : '';
+                        row[`em_${month}`] = emerg ? money.fmt(emerg, false) : '';
+                        row[`amt_${month}`] = amt ? money.fmt(amt, false) : '';
+                        row[`tot_${month}`] = tot ? money.fmt(tot, false) : '';
+
+                        m_sh += shareCount; m_em += emerg; m_amt += amt; m_tot += tot;
+                    });
+
+                    row.t_sh = m_sh ? m_sh : '';
+                    row.t_em = m_em ? money.fmt(m_em, false) : '';
+                    row.t_amt = m_amt ? money.fmt(m_amt, false) : '';
+                    row.t_tot = m_tot ? money.fmt(m_tot, false) : '';
+
+                    g_sh += m_sh; g_em += m_em; g_amt += m_amt; g_tot += m_tot;
+                    rows.push(row);
+                });
+
+                // --- C. CALCULATE MONTH-BY-MONTH CASH FLOW (THE ROLLOVER) ---
+                let runningBalance = 0;
+                const monthTotals = {};
+
+                months.forEach(m => {
+                    const mTxns = txns.filter(t => t.txn_date.startsWith(m));
+
+                    // Money In
+                    const sh = mTxns.filter(t => t.txn_type === 'share_purchase').reduce((a, t) => a + Number(t.metadata?.shares || 0), 0);
+                    const em = mTxns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0);
+                    const amt = mTxns.filter(t => t.txn_type === 'share_purchase').reduce((a, t) => a + Number(t.amount), 0);
+                    const totIn = em + amt;
+
+                    // Other Income (Cash received only)
+                    // We EXCLUDE loan_interest here because interest is only realized as cash
+                    // when a loan_repayment occurs (which is tracked separately).
+                    // If you want to show accrued but unpaid interest, use 'loan_interest'.
+                    const otherIn = mTxns.filter(t => ['sponsor_income', 'other_income'].includes(t.txn_type)).reduce((a, t) => a + Number(t.amount), 0);
+                    const repaid = mTxns.filter(t => t.txn_type === 'loan_repayment').reduce((a, t) => a + Number(t.amount), 0);
+
+                    // Money Out
+                    const loans = mTxns.filter(t => t.txn_type === 'loan_disbursement').reduce((a, t) => a + Number(t.amount), 0);
+                    const fees = mTxns.filter(t => t.txn_type === 'airtel_fee').reduce((a, t) => a + Number(t.amount), 0);
+                    const exp = mTxns.filter(t => t.txn_type === 'expense').reduce((a, t) => a + Number(t.amount), 0);
+                    const totOut = loans + fees + exp;
+
+                    // Calculate closing, then set as next month's opening
+                    const closing = runningBalance + totIn + otherIn + repaid - totOut;
+
+                    monthTotals[m] = {
+                        sh, em, amt, totIn, otherIn, repaid,
+                        loans, fees, exp, totOut,
+                        opening: runningBalance,
+                        closing: closing
+                    };
+
+                    runningBalance = closing;
+                });
+
+                months.forEach(m => {
+                    const o = monthTotals[m].opening;
+                    openingRow[`tot_${m}`] = o ? money.fmt(o, false) : '0';
+                });
+
+                // --- D. OTHER INCOME + LOAN REPAYMENT ROWS ---
+                const otherIncomeRow = { name: 'Other Income (Profits, etc.)', joined: '' };
+                const repaidRow = { name: 'Loan Repayments', joined: '' };
+                let g_other = 0, g_repaid = 0;
+                months.forEach(m => {
+                    const t = monthTotals[m];
+                    otherIncomeRow[`tot_${m}`] = t.otherIn ? money.fmt(t.otherIn, false) : '';
+                    repaidRow[`tot_${m}`] = t.repaid ? money.fmt(t.repaid, false) : '';
+                    g_other += t.otherIn; g_repaid += t.repaid;
+                });
+                otherIncomeRow.t_tot = money.fmt(g_other, false);
+                repaidRow.t_tot = money.fmt(g_repaid, false);
+                rows.push(otherIncomeRow);
+                rows.push(repaidRow);
+
+                // --- E. TOTAL MONEY IN ROW ---
+                const totalInRow = { name: 'Total Money In', joined: '' };
+                let g_loans = 0, g_fees = 0, g_exp = 0;
+                g_sh = 0; g_em = 0; g_amt = 0; g_tot = 0;
+
+                months.forEach(m => {
+                    const t = monthTotals[m];
+                    totalInRow[`sh_${m}`] = t.sh ? t.sh : '';
+                    totalInRow[`em_${m}`] = t.em ? money.fmt(t.em, false) : '';
+                    totalInRow[`amt_${m}`] = t.amt ? money.fmt(t.amt, false) : '';
+                    const monthIn = t.totIn + t.otherIn + t.repaid;
+                    totalInRow[`tot_${m}`] = monthIn ? money.fmt(monthIn, false) : '';
+
+                    g_sh += t.sh; g_em += t.em; g_amt += t.amt; g_tot += t.totIn + t.otherIn + t.repaid;
+                    g_loans += t.loans;
+                    g_fees += t.fees;
+                    g_exp += t.exp;
+                });
+                totalInRow.t_sh = g_sh;
+                totalInRow.t_em = money.fmt(g_em, false);
+                totalInRow.t_amt = money.fmt(g_amt, false);
+                totalInRow.t_tot = money.fmt(g_tot, false);
+                rows.push(totalInRow);
+
+                // --- E. MONEY OUT ROWS ---
+                const loansRow = { name: 'Money Out: Loans', joined: '' };
+                const feesRow = { name: 'Money Out: Fees', joined: '' };
+                const expensesRow = { name: 'Money Out: Expenses', joined: '' };
+
+                months.forEach(m => {
+                    const t = monthTotals[m];
+                    loansRow[`tot_${m}`] = t.loans ? money.fmt(t.loans, false) : '';
+                    feesRow[`tot_${m}`] = t.fees ? money.fmt(t.fees, false) : '';
+                    expensesRow[`tot_${m}`] = t.exp ? money.fmt(t.exp, false) : '';
+                });
+
+                loansRow.t_tot = money.fmt(g_loans, false);
+                feesRow.t_tot = money.fmt(g_fees, false);
+                expensesRow.t_tot = money.fmt(g_exp, false);
+                rows.push(loansRow);
+                rows.push(feesRow);
+                rows.push(expensesRow);
+
+                // --- F. CLOSING BALANCE ROW ---
+                const closingRow = { name: 'Closing Balance', joined: '' };
+                months.forEach(m => {
+                    closingRow[`tot_${m}`] = money.fmt(monthTotals[m].closing, false);
+                });
+                closingRow.t_tot = money.fmt(runningBalance, false);
+                rows.push(closingRow);
+                return {
+                    columns: columns,
+                    rows: rows,
+                    summary: [
+                        { label: 'Grand Total Money In', value: money.fmt(g_tot) },
+                        { label: 'Grand Total Loans Out', value: money.fmt(g_loans) },
+                        { label: 'Grand Total Fees Out', value: money.fmt(g_fees) },
+                        { label: 'Grand Total Expenses Out', value: money.fmt(g_exp) },
+                        { label: 'Final Closing Balance', value: money.fmt(runningBalance) }
+                    ],
+                    notes: 'The closing balance of each month becomes the opening balance of the next.'
+                };
+            }
         }
     };
 
     // =====================================================
-    // ROUTING — safe now that REPORTS is initialized
+    // ROUTING
     // =====================================================
     if (params.id) return renderReport(view, params.id);
     return renderCenter(view);
@@ -771,18 +903,23 @@ ELF.router.register('reports', async (view, params) => {
     function renderCenter(view) {
         const groups = [
             {
-                title: 'Membership', items: [
-                    { id: 'member_register', label: 'Member Register', desc: 'All members with status and contact' },
-                    { id: 'active_members', label: 'Active Members', desc: 'Currently active only' },
-                    { id: 'deactivated_members', label: 'Deactivated Members', desc: 'Former members with end dates' },
-                    { id: 'participation_periods', label: 'Participation Periods', desc: 'Every membership cycle' }
+                title: 'Master Reports', items: [
+                    { id: 'master_ledger', label: 'Master Monthly Ledger', desc: 'The big picture: all members by month with cash flow' }
                 ]
             },
             {
-                title: 'Shares & Savings', items: [
+                title: 'Membership', items: [
+                    { id: 'member_register', label: 'Member Register', desc: 'All members' },
+                    { id: 'active_members', label: 'Active Members', desc: 'Currently active only' },
+                    { id: 'deactivated_members', label: 'Deactivated Members', desc: 'Former members' },
+                    { id: 'participation_periods', label: 'Participation Periods', desc: 'Membership history' }
+                ]
+            },
+            {
+                title: 'Shares & Contributions', items: [
                     { id: 'share_register', label: 'Share Register', desc: 'Every share purchase' },
                     { id: 'member_share_balances', label: 'Member Share Balances', desc: 'Current shares per member' },
-                    { id: 'contribution_register', label: 'Contribution Register', desc: 'All contributions with split' }
+                    { id: 'contribution_register', label: 'Contribution Register', desc: 'All contributions' }
                 ]
             },
             {
@@ -843,6 +980,33 @@ ELF.router.register('reports', async (view, params) => {
     `;
     }
 
+    // Two-row grouped-header table (used by the master ledger)
+    function matrixTable(data) {
+        const esc = _.escapeHtml;
+        const cols = data.columns;
+        const cell = 'padding:6px 8px;border:1px solid var(--border);white-space:nowrap';
+        const top = [], sub = [];
+        let i = 0;
+        while (i < cols.length) {
+            const c = cols[i];
+            if (c.group) {
+                let n = 1;
+                while (i + n < cols.length && cols[i + n].group === c.group) n++;
+                top.push(`<th colspan="${n}" style="${cell};text-align:center">${esc(c.group)}</th>`);
+                for (let k = 0; k < n; k++) sub.push(`<th style="${cell};text-align:center">${esc(cols[i + k].header)}</th>`);
+                i += n;
+            } else {
+                top.push(`<th rowspan="2" style="${cell};text-align:center;vertical-align:middle">${esc(c.header)}</th>`);
+                i++;
+            }
+        }
+        const strong = r => /^(Opening Balance|Total Money In|Closing Balance)/.test(r.name || '');
+        const body = data.rows.map(r => `<tr${strong(r) ? ' style="font-weight:700"' : ''}>${cols.map(c =>
+            `<td style="${cell};text-align:${c.align || 'left'}">${esc(String(r[c.dataKey] ?? ''))}</td>`).join('')}</tr>`).join('');
+        return `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">
+          <thead><tr>${top.join('')}</tr><tr>${sub.join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+    }
+
     async function renderReport(view, id) {
         const meta = REPORTS[id];
         if (!meta) {
@@ -885,7 +1049,7 @@ ELF.router.register('reports', async (view, params) => {
                 lastData = data;
 
                 out.innerHTML = `
-          ${_.table(
+          ${data.columns.some(c => c.group) ? matrixTable(data) : _.table(
                     data.columns.map(c => ({ label: c.header, key: c.dataKey, align: c.align, mono: c.mono })),
                     data.rows,
                     { empty: 'No records in this range' }
@@ -909,13 +1073,11 @@ ELF.router.register('reports', async (view, params) => {
 
         _.$('#rp-pdf').onclick = async () => {
             if (!lastData) return;
-            const period = (_.$('#rp-from'))
-                ? `${_.$('#rp-from').value} to ${_.$('#rp-to').value}`
-                : '';
+            const period = (_.$('#rp-from')) ? `${_.$('#rp-from').value} to ${_.$('#rp-to').value}` : '';
             await pdf.present({
                 title: meta.title,
                 period,
-                columns: lastData.columns.map(c => ({ header: c.header, dataKey: c.dataKey, halign: c.align || 'left' })),
+                columns: lastData.columns.map(c => ({ header: c.header, dataKey: c.dataKey, halign: c.align || 'left', group: c.group, rowSpan: c.rowSpan })),
                 rows: lastData.rows,
                 summary: lastData.summary,
                 orientation: meta.orientation || 'portrait',
@@ -925,7 +1087,7 @@ ELF.router.register('reports', async (view, params) => {
 
         _.$('#rp-csv').onclick = () => {
             if (!lastData) return;
-            const header = lastData.columns.map(c => `"${c.header}"`).join(',');
+            const header = lastData.columns.map(c => `"${c.group ? c.group + ' ' : ''}${c.header}"`).join(',');
             const body = lastData.rows.map(r => lastData.columns.map(c => {
                 const v = r[c.dataKey] ?? '';
                 const s = String(v).replace(/"/g, '""');

@@ -10,6 +10,17 @@ ELF.router.register('contributions', async (view) => {
     { value: 'cash', label: 'Cash' }
   ];
 
+  // Generate month options (current year + last 6 months)
+  const monthOptions = [];
+  const d = new Date();
+  for (let i = 0; i < 8; i++) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const label = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+    monthOptions.push({ value: `${y}-${m}`, label });
+    d.setMonth(d.getMonth() - 1);
+  }
+
   view.innerHTML = `
     ${_.pageHead('Record Contribution', 'Enter total received — the system splits it automatically')}
 
@@ -43,12 +54,11 @@ ELF.router.register('contributions', async (view) => {
       options: members.length ? members.map(m => ({ value: m.id, label: `${m.full_name}` }))
         : [{ value: '', label: 'No active members yet' }]
     },
+    { name: 'period_month', label: 'Month', type: 'select', required: true, options: monthOptions },
     { name: 'total', label: 'Total Amount Received (RWF)', type: 'number', required: true, placeholder: 'e.g. 6000' },
     { name: 'include_emergency', label: 'Include 1,000 RWF Emergency Contribution', type: 'select', options: [{ value: 'yes', label: 'Yes, include' }, { value: 'no', label: 'No, already paid' }], default: 'yes' },
-    { name: 'txn_date', label: 'Date', type: 'date', required: true, default: new Date().toISOString().slice(0, 10) },
-    { name: 'method', label: 'Payment Method', type: 'select', options: methods },
-    { name: 'reference', label: 'Reference (optional)' },
-    { name: 'notes', label: 'Notes', type: 'textarea', full: true }
+    { name: 'txn_date', label: 'Date Received', type: 'date', required: true, default: new Date().toISOString().slice(0, 10) },
+    { name: 'method', label: 'Payment Method', type: 'select', options: methods }
   ];
   const form = _.buildForm(schema);
   const formEl = _.$('#c-form');
@@ -81,7 +91,7 @@ ELF.router.register('contributions', async (view) => {
   renderPreview();
 
   async function loadRecent() {
-    const { rows } = await db.listTransactions({ type: 'member_contribution', pageSize: 5 });
+    const { rows } = await db.listTransactions({ type: 'share_purchase', pageSize: 5 });
     _.$('#c-recent').innerHTML = _.table([
       { label: 'Date', render: r => new Date(r.txn_date).toLocaleDateString() },
       { label: 'Amount', align: 'right', render: r => money.fmt(r.amount) }
@@ -96,6 +106,17 @@ ELF.router.register('contributions', async (view) => {
     const total = Number(data.total);
     if (!total || total <= 0) return _.toast('Amount must be greater than 0', 'error');
 
+    // --- VALIDATION: Prevent double recording for the same month ---
+    const { data: existing } = await db.sb.from('transactions')
+      .select('id')
+      .eq('member_id', data.member_id)
+      .eq('txn_type', 'share_purchase')
+      .eq('period_month', data.period_month);
+
+    if (existing && existing.length > 0) {
+      return _.toast('This member has already contributed for ' + data.period_month, 'error');
+    }
+
     const skipEmg = data.include_emergency === 'no';
     const split = engine.splitContribution(total, { skipEmergency: skipEmg });
 
@@ -105,15 +126,13 @@ ELF.router.register('contributions', async (view) => {
         total,
         txn_date: new Date(data.txn_date).toISOString(),
         method: data.method,
-        reference: data.reference,
-        notes: data.notes,
+        period_month: data.period_month,
         split
       });
       await audit.log('CREATE', 'transaction', txn.id, null, txn, 'Recorded contribution');
       _.toast('Contribution saved successfully', 'success');
 
       formEl.querySelector('[name=total]').value = '';
-      formEl.querySelector('[name=notes]').value = '';
       renderPreview();
       loadRecent();
     } catch (e) {

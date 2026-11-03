@@ -23,21 +23,28 @@ ELF.router.register('dashboard', async (view) => {
 
   let shareValue = 0, emergencyIn = 0, emergencyOut = 0, income = 0, expense = 0;
 
-  for (const t of txns) {
-    if (t.status === 'REVERSED') continue;
+  // 1. Filter out any REVERSED rows
+  const validTxns = txns.filter(t => t.status !== 'REVERSED');
+
+  // 2. Define exact money in / money out types
+  const cashInTypes = ['share_purchase', 'emergency_contribution', 'sponsor_income', 'other_income', 'deposit', 'loan_repayment'];
+  const cashOutTypes = ['loan_disbursement', 'airtel_fee', 'expense', 'withdrawal', 'member_settlement', 'emergency_assistance'];
+
+  for (const t of validTxns) {
     const amt = Number(t.amount) || 0;
     const accCode = accMap[t.account_id]?.code || 'CASH';
 
-    // Money In vs Money Out Math
-    const inTypes = ['loan_repayment', 'member_contribution', 'share_purchase', 'emergency_contribution', 'sponsor_income', 'other_income', 'deposit'];
-    const isIn = inTypes.includes(t.txn_type);
-
     if (cashFlow[accCode]) {
-      if (isIn) cashFlow[accCode].in += amt;
-      else cashFlow[accCode].out += amt;
+      if (cashInTypes.includes(t.txn_type)) {
+        cashFlow[accCode].in += amt;
+      } else if (cashOutTypes.includes(t.txn_type)) {
+        cashFlow[accCode].out += amt;
+      }
+      // Anything else (loan_interest, loan_penalty, reversal) is IGNORED for cash flow.
+      // They are accruals, not cash.
     }
 
-    // Ledger Math
+    // Ledger Math (for the summary cards)
     switch (t.txn_type) {
       case 'share_purchase': shareValue += amt; break;
       case 'emergency_contribution': emergencyIn += amt; break;
@@ -55,6 +62,11 @@ ELF.router.register('dashboard', async (view) => {
   const distributable = Math.max(0, income - expense);
   const openLoans = loans.filter(l => l.status === 'ACTIVE' || l.status === 'OVERDUE');
   const outstanding = openLoans.reduce((a, l) => a + Number(l.principal || 0), 0);
+
+  for (const code in cashFlow) {
+    const acc = accounts.find(a => a.code === code);
+    if (acc) cashFlow[code].opening = Number(acc.opening_balance || 0);
+  }
 
   function renderFlow(code, label) {
     const f = cashFlow[code];

@@ -155,7 +155,7 @@ ELF.db = (function () {
     }
 
     // -------- CONTRIBUTION (atomic-ish: transaction + period mark) --------
-    async function recordContribution({ member_id, total, txn_date, method, reference, notes, split }) {
+    async function recordContribution({ member_id, total, txn_date, method, period_month, split }) {
         const account = await getAccountByCode(methodToAccount(method));
         const txn = await createTransaction({
             txn_date: txn_date || new Date().toISOString(),
@@ -164,9 +164,8 @@ ELF.db = (function () {
             amount: total,
             account_id: account ? account.id : null,
             member_id,
-            reference: reference || null,
+            period_month: period_month,
             description: `Contribution received`,
-            notes: notes || null,
             status: 'POSTED',
             metadata: {
                 shareValue: split.shareValue,
@@ -184,17 +183,19 @@ ELF.db = (function () {
                 txn_number: gen2, txn_type: 'emergency_contribution',
                 amount: split.emergency, account_id: account?.id || null,
                 member_id, reference: txn.txn_number,
+                period_month: period_month,
                 description: 'Monthly emergency contribution'
             }), 'emergencyRow');
         }
 
-        // Share purchase (THIS is where shares are counted)
+        // Share purchase
         if (split.shareValue > 0) {
             const gen3 = await nextNumber('report.prefix');
             await run(sb.from('transactions').insert({
                 txn_number: gen3, txn_type: 'share_purchase',
                 amount: split.shareValue, account_id: account?.id || null,
                 member_id, reference: txn.txn_number,
+                period_month: period_month,
                 description: `Share purchase: ${split.shares} × ${split.sharePrice}`,
                 metadata: { shares: split.shares, sharePrice: split.sharePrice }
             }), 'shareRow');
@@ -593,6 +594,50 @@ ELF.db = (function () {
         return run(sb.from('profit_periods').update({ status: 'CALCULATED', finalized_at: null }).eq('id', periodId).select().single(), 'reopen');
     }
 
+    // -------- DISTRIBUTION / WITHDRAWAL --------
+    async function distributeAll({ totalAvailable, feeAmount, netTotal, members, notes }) {
+        const account = await getAccountByCode('AIRTEL');
+
+        // 1. Record a "withdrawal" transaction for the fee
+        if (feeAmount > 0) {
+            const gen = await nextNumber('report.prefix');
+            await run(sb.from('transactions').insert({
+                txn_number: gen, txn_type: 'airtel_fee',
+                amount: feeAmount, account_id: account?.id || null,
+                description: 'Airtel fee for full distribution',
+                status: 'POSTED'
+            }), 'distributionFee');
+        }
+
+        // 2. Record a "withdrawal" transaction for the net amount given to members
+        const gen = await nextNumber('report.prefix');
+        const txn = await run(sb.from('transactions').insert({
+            txn_number: gen, txn_type: 'withdrawal',
+            amount: netTotal, account_id: account?.id || null,
+            description: 'Full cooperative distribution to members',
+            notes: notes || null,
+            status: 'POSTED',
+            metadata: { distributed: members }
+        }).select().single(), 'distributionTxn');
+
+        // 3. Reset all member balances to zero by recording individual "settlement" entries
+        //    (We can't delete history, so we record a settlement for each member)
+        for (const m of members) {
+            if (m.totalBalance <= 0) continue;
+            const gen2 = await nextNumber('report.prefix');
+            await run(sb.from('transactions').insert({
+                txn_number: gen2, txn_type: 'member_settlement',
+                amount: -m.totalBalance, // negative to offset
+                account_id: account?.id || null,
+                member_id: m.id,
+                description: `Distribution payout to ${m.full_name}`,
+                status: 'POSTED'
+            }), 'memberSettlement');
+        }
+
+        return txn;
+    }
+
     return {
         sb, run,
         loadSettings, saveSetting,
@@ -615,7 +660,7 @@ ELF.db = (function () {
         // profit periods
         listProfitPeriods, getProfitPeriod, createProfitPeriod,
         computePeriodTotals, buildEligibleMembers,
-        saveProfitCalculation, finalizeProfitPeriod, listProfitAllocations, reopenProfitPeriod,
+        saveProfitCalculation,  distributeAll, finalizeProfitPeriod, listProfitAllocations, reopenProfitPeriod,
         // income / expense
         recordIncome, recordExpense
     };

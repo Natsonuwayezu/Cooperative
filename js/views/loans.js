@@ -101,12 +101,26 @@ ELF.router.register('loans', async (view, params) => {
 
     // ---------- NEW LOAN MODAL ----------
     async function newLoanModal(onDone) {
-        const [members, borrowers, sponsors] = await Promise.all([
+        // 1. Fetch all necessary data
+        const [members, borrowers, sponsors, accounts, txns] = await Promise.all([
             db.listMembers({ status: 'ACTIVE', pageSize: 500 }).then(r => r.rows),
             db.listBorrowers(),
-            db.listSponsors()
+            db.listSponsors(),
+            db.listAccounts(),
+            db.sb.from('transactions').select('amount, txn_type, account_id, status').then(r => r.data || [])
         ]);
 
+        // 2. Calculate available Airtel Balance
+        const airtelAcc = accounts.find(a => a.code === 'AIRTEL');
+        const inTypes = ['loan_repayment', 'member_contribution', 'share_purchase', 'emergency_contribution', 'sponsor_income', 'other_income', 'deposit'];
+        let airtelBalance = airtelAcc ? Number(airtelAcc.opening_balance) : 0;
+
+        txns.forEach(t => {
+            if (t.status === 'REVERSED' || t.account_id !== airtelAcc?.id) return;
+            airtelBalance += inTypes.includes(t.txn_type) ? Number(t.amount) : -Number(t.amount);
+        });
+
+        // 3. Build the Dropdowns
         const borrowerOptions = [
             { value: '', label: '— Select borrower —' },
             ...members.map(m => ({ value: 'm:' + m.id, label: `${m.full_name}` })),
@@ -137,6 +151,7 @@ ELF.router.register('loans', async (view, params) => {
         const form = _.buildForm(schema);
         body.innerHTML = form.html + `<div id="loan-preview" class="mt-16"></div>`;
 
+        // 4. Live Preview with Balance Check
         function renderPreview() {
             const data = form.read(body);
             const p = Number(data.principal) || 0;
@@ -144,11 +159,19 @@ ELF.router.register('loans', async (view, params) => {
             const min = Number(ELF.settings['finance.min_loan']) || 1000;
             const fee = (data.disbursement_method === 'airtel') ? ELF.engine.airtelOutgoingFee() : 0;
             const previewEl = body.querySelector('#loan-preview');
+
             if (!p) { previewEl.innerHTML = ''; return; }
+
             if (p < min) {
                 previewEl.innerHTML = `<div class="badge overdue">Below minimum loan (${money.fmt(min)})</div>`;
                 return;
             }
+
+            if (data.disbursement_method === 'airtel' && (p + fee) > airtelBalance) {
+                previewEl.innerHTML = `<div class="badge overdue">Insufficient Airtel balance. Available: ${money.fmt(airtelBalance)}</div>`;
+                return;
+            }
+
             previewEl.innerHTML = `
         <div class="preview">
           <div class="row"><span>Principal</span><strong>${money.fmt(p)}</strong></div>
@@ -158,9 +181,11 @@ ELF.router.register('loans', async (view, params) => {
           <div class="row total"><span>Total cash out</span><strong>${money.fmt(p + fee)}</strong></div>
         </div>`;
         }
+
         body.addEventListener('input', renderPreview);
         renderPreview();
 
+        // 5. Save Handler with Validation
         _.openModal({
             title: 'New Loan',
             body,
@@ -171,9 +196,15 @@ ELF.router.register('loans', async (view, params) => {
                         const data = form.read(body);
                         const errs = _.validateRequired(data, schema);
                         if (Object.keys(errs).length) return _.toast('Please complete required fields', 'error');
+
                         const principal = Number(data.principal);
                         const min = Number(ELF.settings['finance.min_loan']) || 1000;
                         if (principal < min) return _.toast('Below minimum loan', 'error');
+
+                        const fee = (data.disbursement_method === 'airtel') ? ELF.engine.airtelOutgoingFee() : 0;
+                        if (data.disbursement_method === 'airtel' && (principal + fee) > airtelBalance) {
+                            return _.toast('Insufficient Airtel balance to issue this loan', 'error');
+                        }
 
                         // Split borrower_ref
                         const [kind, id] = data.borrower_ref.split(':');
@@ -335,18 +366,18 @@ ELF.router.register('loans', async (view, params) => {
         </div>`;
         }
 
-            // Actions
-    _. $ ('#act-compound').onclick = async () => {
-      const ok = await _.confirm('This will calculate all unpaid interest for the months passed, compound it, and add it to the ledger. Continue?', { okLabel: 'Charge' });
-      if (!ok) return;
-      try {
-        await db.sb.rpc('compound_loan_interest', { p_loan_id: loan.id });
-        _.toast('Compound interest charged successfully');
-        renderDetail(view, id);
-      } catch (e) { _.toast(e.message, 'error'); }
-    };
+        // Actions
+        _.$('#act-compound').onclick = async () => {
+            const ok = await _.confirm('This will calculate all unpaid interest for the months passed, compound it, and add it to the ledger. Continue?', { okLabel: 'Charge' });
+            if (!ok) return;
+            try {
+                await db.sb.rpc('compound_loan_interest', { p_loan_id: loan.id });
+                _.toast('Compound interest charged successfully');
+                renderDetail(view, id);
+            } catch (e) { _.toast(e.message, 'error'); }
+        };
 
-    _. $ ('#act-interest').onclick = () => chargeInterestModal(loan, () => renderDetail(view, id));
+        _.$('#act-interest').onclick = () => chargeInterestModal(loan, () => renderDetail(view, id));
         _.$('#act-penalty').onclick = () => chargePenaltyModal(loan, () => renderDetail(view, id));
         _.$('#act-repay').onclick = () => { location.hash = 'repayments/' + id; };
         const closeBtn = _.$('#act-close');
