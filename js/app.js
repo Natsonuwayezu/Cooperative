@@ -24,6 +24,16 @@
         // ---------- settings ----------
         await ELF.db.loadSettings();
 
+        // --- AUTO DAILY COMPOUND INTEREST ---
+        try {
+            await ELF.sb.rpc('apply_daily_interest');
+            console.log('[boot] Daily interest applied');
+        } catch (e) {
+            console.warn('[boot] Daily interest failed:', e.message);
+        }
+
+
+
         // ---------- wire static UI ----------
         const themeBtn = document.getElementById('theme-toggle');
         if (themeBtn) themeBtn.onclick = () => {

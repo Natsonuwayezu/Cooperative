@@ -89,8 +89,10 @@ ELF.router.register('loans', async (view, params) => {
           <button class="btn-ghost btn-sm" id="prev" ${page <= 1 ? 'disabled' : ''}>‹ Prev</button>
           <button class="btn-ghost btn-sm" id="next" ${page >= pages ? 'disabled' : ''}>Next ›</button>
         </div>`;
-            _.$('#prev').onclick = () => { page--; load(); };
-            _.$('#next').onclick = () => { page++; load(); };
+            const prevBtn = _.$('#prev');
+            const nextBtn = _.$('#next');
+            if (prevBtn) prevBtn.onclick = () => { page--; load(); };
+            if (nextBtn) nextBtn.onclick = () => { page++; load(); };
         }
 
         _.$('#l-status').onchange = e => { statusFilter = e.target.value; page = 1; load(); };
@@ -259,10 +261,33 @@ ELF.router.register('loans', async (view, params) => {
         const bal = engine.computeLoanBalance(loan, interest, penalties, repayments);
         const overdue = engine.isOverdue(loan);
 
+        // --- FIXED: Show either today's already-charged interest, or what's accruing ---
+        const todayStr = new Date().toISOString().slice(0, 10);
+
+        // Did we charge interest today?
+        const todayCharge = interest.find(i => i.charge_date === todayStr);
+
+        let displayAmount = 0;
+        let displayLabel = '';
+
+        if (todayCharge) {
+            // Interest was already charged today — show what was charged
+            displayAmount = Number(todayCharge.interest_amount);
+            displayLabel = `Charged today on ${money.fmt(todayCharge.base_amount, false)} base`;
+        } else {
+            // Not yet charged today — show what would accrue
+            const last = [...interest].sort((a, b) => new Date(b.charge_date) - new Date(a.charge_date))[0];
+            const lastDate = last ? new Date(last.charge_date) : new Date(loan.issue_date);
+            const daysSinceLast = Math.max(0, Math.floor((new Date() - lastDate) / (1000 * 60 * 60 * 24)));
+            const dailyRate = Number(loan.interest_rate_pct) / 100 / 30;
+            displayAmount = Math.floor(bal.totalOutstanding * dailyRate * daysSinceLast);
+            displayLabel = daysSinceLast === 0
+                ? `Will charge on next app open`
+                : `${daysSinceLast} day(s) at ${(dailyRate * 100).toFixed(4)}%/day`;
+        }
+
         view.innerHTML = `
       ${_.pageHead('Loan Details', borrowerLabel, `
-                <button class="btn-ghost" id="act-compound">Auto-Charge Compound Interest</button>
-        <button class="btn-ghost" id="act-interest">Charge Manual Interest</button>
         <button class="btn-ghost" id="act-penalty">Add Penalty</button>
         <button class="btn-primary" id="act-repay">Record Repayment</button>
         ${loan.status === 'ACTIVE' ? `<button class="btn-success" id="act-close">Mark Completed</button>` : ''}
@@ -274,6 +299,17 @@ ELF.router.register('loans', async (view, params) => {
         ${_.kpi('Total Outstanding', money.fmt(bal.totalOutstanding),
             `incl. interest ${money.fmt(bal.interestOutstanding)} + penalties ${money.fmt(bal.penaltyOutstanding)}`,
             bal.totalOutstanding ? 'warn' : '')}
+      </div>
+
+      <div class="card mb-16" style="background:var(--accent-soft); border-color:var(--accent);">
+        <div class="card-title" style="color:var(--accent)">Daily Interest (Auto)</div>
+        <div class="card-sub">${todayCharge ? 'Already charged today' : 'Accruing since last charge'}</div>
+        <div style="font-size:22px; font-weight:700; color:var(--accent); margin-top:6px">
+          ${money.fmt(displayAmount)}
+        </div>
+        <div class="card-sub" style="margin-top:4px">
+          ${displayLabel}
+        </div>
       </div>
 
       <div class="grid-2 mb-16">
@@ -367,17 +403,6 @@ ELF.router.register('loans', async (view, params) => {
         }
 
         // Actions
-        _.$('#act-compound').onclick = async () => {
-            const ok = await _.confirm('This will calculate all unpaid interest for the months passed, compound it, and add it to the ledger. Continue?', { okLabel: 'Charge' });
-            if (!ok) return;
-            try {
-                await db.sb.rpc('compound_loan_interest', { p_loan_id: loan.id });
-                _.toast('Compound interest charged successfully');
-                renderDetail(view, id);
-            } catch (e) { _.toast(e.message, 'error'); }
-        };
-
-        _.$('#act-interest').onclick = () => chargeInterestModal(loan, () => renderDetail(view, id));
         _.$('#act-penalty').onclick = () => chargePenaltyModal(loan, () => renderDetail(view, id));
         _.$('#act-repay').onclick = () => { location.hash = 'repayments/' + id; };
         const closeBtn = _.$('#act-close');
@@ -391,72 +416,6 @@ ELF.router.register('loans', async (view, params) => {
             _.toast('Loan completed');
             renderDetail(view, id);
         };
-    }
-
-    // ---------- CHARGE INTEREST MODAL ----------
-    function chargeInterestModal(loan, onDone) {
-        (async () => {
-            const ints = await db.listLoanInterest(loan.id);
-            const pens = await db.listLoanPenalties(loan.id);
-            const reps = await db.listLoanRepayments(loan.id);
-            const bal = engine.computeLoanBalance(loan, ints, pens, reps);
-
-            const today = new Date();
-            const last = [...ints].sort((a, b) => new Date(b.charge_date) - new Date(a.charge_date))[0];
-            const fromDate = last ? new Date(last.charge_date) : new Date(loan.issue_date);
-            const months = engine.fullMonthsBetween(fromDate, today);
-            const suggestedBase = bal.totalOutstanding;
-            const suggestedRate = Number(loan.interest_rate_pct);
-
-            const schema = [
-                { name: 'charge_date', label: 'Charge date', type: 'date', required: true, default: today.toISOString().slice(0, 10) },
-                { name: 'rate_pct', label: 'Rate (% / month)', type: 'number', required: true, default: suggestedRate, step: '0.001' },
-                { name: 'base_amount', label: 'Base amount (RWF)', type: 'number', required: true, default: suggestedBase },
-                { name: 'months', label: 'Months charged', type: 'number', required: true, default: Math.max(months, 1) },
-                { name: 'notes', label: 'Notes', type: 'textarea', full: true }
-            ];
-            const body = document.createElement('div');
-            const form = _.buildForm(schema);
-            body.innerHTML = form.html + `<div id="ipv" class="mt-16"></div>`;
-
-            function render() {
-                const d = form.read(body);
-                const amt = engine.calcMonthlyInterest(Number(d.base_amount) || 0, Number(d.rate_pct) || 0, Number(d.months) || 0);
-                body.querySelector('#ipv').innerHTML = `
-          <div class="preview">
-            <div class="row total"><span>Interest to charge</span><strong>${money.fmt(amt)}</strong></div>
-          </div>`;
-            }
-            body.addEventListener('input', render);
-            render();
-
-            _.openModal({
-                title: 'Charge Interest',
-                body,
-                actions: [
-                    { label: 'Cancel' },
-                    {
-                        label: 'Charge', kind: 'primary', close: false, onClick: async () => {
-                            const d = form.read(body);
-                            const amt = engine.calcMonthlyInterest(Number(d.base_amount) || 0, Number(d.rate_pct) || 0, Number(d.months) || 0);
-                            if (amt <= 0) return _.toast('Interest amount must be > 0', 'error');
-                            await db.chargeInterest({
-                                loan_id: loan.id,
-                                charge_date: d.charge_date,
-                                rate_pct: Number(d.rate_pct),
-                                base_amount: Number(d.base_amount),
-                                interest_amount: amt,
-                                notes: d.notes || null
-                            });
-                            await audit.log('CREATE', 'loan_interest', loan.id, null, { interest_amount: amt }, 'Interest charged');
-                            _.toast('Interest charged: ' + money.fmt(amt));
-                            _.closeModal();
-                            onDone && onDone();
-                        }
-                    }
-                ]
-            });
-        })();
     }
 
     // ---------- CHARGE PENALTY MODAL ----------
