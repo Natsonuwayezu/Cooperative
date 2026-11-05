@@ -53,8 +53,8 @@ ELF.router.register('dashboard', async (view) => {
       case 'loan_penalty':
       case 'sponsor_income':
       case 'other_income': income += amt; break;
-      case 'expense':
-      case 'airtel_fee': expense += amt; break;
+      case 'airtel_fee':
+      case 'emergency_assistance': expense += amt; break;
     }
   }
 

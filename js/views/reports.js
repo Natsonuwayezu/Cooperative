@@ -732,7 +732,6 @@ ELF.router.register('reports', async (view, params) => {
                 const rows = [];
 
                 // --- A. OPENING BALANCE ROW ---
-                // Filled per month after the rollover below (each month opens with the previous close)
                 const openingRow = { name: 'Opening Balance', joined: '' };
                 columns.forEach(c => { if (!['name', 'joined'].includes(c.dataKey)) openingRow[c.dataKey] = ''; });
                 rows.push(openingRow);
@@ -741,6 +740,10 @@ ELF.router.register('reports', async (view, params) => {
                 const activeMembers = members.filter(m => m.status === 'ACTIVE');
                 let g_sh = 0, g_em = 0, g_amt = 0, g_tot = 0;
 
+                // Pre-calculate total pool metrics for fair-share
+                const totalPoolIn = txns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0);
+                const totalPoolOut = txns.filter(t => t.txn_type === 'emergency_assistance').reduce((a, t) => a + Number(t.amount), 0);
+
                 activeMembers.forEach(m => {
                     const row = { name: m.full_name, joined: new Date(m.registration_date).toLocaleDateString() };
                     let m_sh = 0, m_em = 0, m_amt = 0, m_tot = 0;
@@ -748,6 +751,8 @@ ELF.router.register('reports', async (view, params) => {
                     months.forEach(month => {
                         const mTxns = txns.filter(t => t.member_id === m.id && t.txn_date.startsWith(month));
                         const shareCount = mTxns.filter(t => t.txn_type === 'share_purchase').reduce((a, t) => a + Number(t.metadata?.shares || 0), 0);
+
+                        // Just show what they paid THIS month.
                         const emerg = mTxns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0);
                         const amt = mTxns.filter(t => t.txn_type === 'share_purchase').reduce((a, t) => a + Number(t.amount), 0);
                         const tot = emerg + amt;
@@ -760,12 +765,17 @@ ELF.router.register('reports', async (view, params) => {
                         m_sh += shareCount; m_em += emerg; m_amt += amt; m_tot += tot;
                     });
 
-                    row.t_sh = m_sh ? m_sh : '';
-                    row.t_em = m_em ? money.fmt(m_em, false) : '';
-                    row.t_amt = m_amt ? money.fmt(m_amt, false) : '';
-                    row.t_tot = m_tot ? money.fmt(m_tot, false) : '';
+                    // --- FIX: Calculate fair-share for the TOTAL column ---
+                    const totalMyContrib = txns.filter(t => t.member_id === m.id && t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0);
+                    const totalMyDeduction = totalPoolIn > 0 ? Math.round((totalMyContrib / totalPoolIn) * totalPoolOut) : 0;
+                    const netEmergency = totalMyContrib - totalMyDeduction;
 
-                    g_sh += m_sh; g_em += m_em; g_amt += m_amt; g_tot += m_tot;
+                    row.t_sh = m_sh ? m_sh : '';
+                    row.t_em = netEmergency ? money.fmt(netEmergency, false) : ''; // Show net balance here
+                    row.t_amt = m_amt ? money.fmt(m_amt, false) : '';
+                    row.t_tot = m_tot ? money.fmt(m_tot - totalMyDeduction, false) : ''; // Deduct from overall total too
+
+                    g_sh += m_sh; g_em += netEmergency; g_amt += m_amt; g_tot += (m_tot - totalMyDeduction);
                     rows.push(row);
                 });
 
@@ -783,16 +793,13 @@ ELF.router.register('reports', async (view, params) => {
                     const totIn = em + amt;
 
                     // Other Income (Cash received only)
-                    // We EXCLUDE loan_interest here because interest is only realized as cash
-                    // when a loan_repayment occurs (which is tracked separately).
-                    // If you want to show accrued but unpaid interest, use 'loan_interest'.
                     const otherIn = mTxns.filter(t => ['sponsor_income', 'other_income'].includes(t.txn_type)).reduce((a, t) => a + Number(t.amount), 0);
                     const repaid = mTxns.filter(t => t.txn_type === 'loan_repayment').reduce((a, t) => a + Number(t.amount), 0);
 
                     // Money Out
                     const loans = mTxns.filter(t => t.txn_type === 'loan_disbursement').reduce((a, t) => a + Number(t.amount), 0);
                     const fees = mTxns.filter(t => t.txn_type === 'airtel_fee').reduce((a, t) => a + Number(t.amount), 0);
-                    const exp = mTxns.filter(t => t.txn_type === 'expense').reduce((a, t) => a + Number(t.amount), 0);
+                    const exp = mTxns.filter(t => ['expense', 'emergency_assistance'].includes(t.txn_type)).reduce((a, t) => a + Number(t.amount), 0);
                     const totOut = loans + fees + exp;
 
                     // Calculate closing, then set as next month's opening

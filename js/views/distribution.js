@@ -44,8 +44,15 @@ ELF.router.register('distribution', async (view) => {
         const mTxns = txns.filter(t => t.member_id === m.id);
         const shares = mTxns.filter(t => t.txn_type === 'share_purchase').reduce((a, t) => a + Number(t.metadata?.shares || 0), 0);
         const shareValue = shares * Number(ELF.settings['finance.share_price'] || 0);
-        const emergency = mTxns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0)
-            - mTxns.filter(t => t.txn_type === 'emergency_assistance').reduce((a, t) => a + Number(t.amount), 0);
+        // Calculate total pool
+        const totalPoolIn = txns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0);
+        const totalPoolOut = txns.filter(t => t.txn_type === 'emergency_assistance').reduce((a, t) => a + Number(t.amount), 0);
+
+        // ... inside memberData.map(m => { ...
+        const myContrib = mTxns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0);
+        const myDeduction = totalPoolIn > 0 ? Math.round((myContrib / totalPoolIn) * totalPoolOut) : 0;
+
+        const emergency = myContrib - myDeduction;
         const profitShare = totalShares > 0 ? Math.floor((distributableProfit * shares) / totalShares) : 0;
 
         // Loan Debt

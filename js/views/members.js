@@ -110,7 +110,15 @@ ELF.router.register('members', async (view, params) => {
     ]);
 
     const shareInfo = ELF.engine.computeShareBalance(txns);
-    const emergency = ELF.engine.computeEmergencyBalance(txns);
+    // Calculate fair-share emergency balance
+    const totalPoolIn = (await db.sb.from('transactions').select('amount').eq('txn_type', 'emergency_contribution').neq('status', 'REVERSED')).data.reduce((a, t) => a + Number(t.amount), 0);
+    const totalPoolOut = (await db.sb.from('transactions').select('amount').eq('txn_type', 'emergency_assistance').neq('status', 'REVERSED')).data.reduce((a, t) => a + Number(t.amount), 0);
+
+    const myContributions = txns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0);
+    const myFundedShare = totalPoolIn > 0 ? Math.round((myContributions / totalPoolIn) * totalPoolOut) : 0;
+
+    // The actual available emergency balance for this member
+    const emergency = myContributions - myFundedShare;
     const shareValue = shareInfo.shares * Number(ELF.settings['finance.share_price'] || 0);
     const loanBalance = loans.filter(l => l.status === 'ACTIVE' || l.status === 'OVERDUE').reduce((a, l) => a + Number(l.principal), 0);
 
@@ -199,9 +207,14 @@ ELF.router.register('members', async (view, params) => {
         ],
         rows: statementRows,
         summary: [
-          { label: 'Shares', value: `${shareInfo.shares} (${money.fmt(shareValue)})` },
-          { label: 'Emergency', value: money.fmt(emergency) },
-          { label: 'Profit', value: money.fmt(totalProfit + liveProfitShare) },
+          { label: 'Total Shares', value: `${shareInfo.shares} (${money.fmt(shareValue)})` },
+
+          // Show the contribution and the deduction separately
+          { label: 'Emergency Contributed', value: money.fmt(txns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0)) },
+          { label: 'Emergency Fair-Share Deduction', value: `- ${money.fmt(txns.filter(t => t.txn_type === 'emergency_contribution').reduce((a, t) => a + Number(t.amount), 0) - emergency)}` },
+          { label: 'Emergency Balance Remaining', value: money.fmt(emergency) },
+
+          { label: 'Profit Earned', value: money.fmt(totalProfit + liveProfitShare) },
           { label: 'Loan Balance', value: money.fmt(loanBalance) },
           { label: 'TOTAL AVAILABLE', value: money.fmt(totalAvailable) }
         ]
