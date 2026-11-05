@@ -193,32 +193,57 @@ ELF.router.register('reports', async (view, params) => {
         emergency_balances: {
             title: 'Member Emergency Balances', desc: 'Per-member emergency fund', hasRange: false,
             run: async () => {
-                const { data } = await db.sb.from('transactions').select('member_id, amount, txn_type, status, members(full_name)').in('txn_type', ['emergency_contribution', 'emergency_assistance']);
+                // 1. Get all emergency transactions
+                const { data } = await db.sb.from('transactions')
+                    .select('member_id, amount, txn_type, status, members(full_name)')
+                    .in('txn_type', ['emergency_contribution', 'emergency_assistance'])
+                    .neq('status', 'REVERSED');
+
+                // 2. Calculate the total pool
+                let totalPoolIn = 0;
+                let totalPoolOut = 0;
+
+                (data || []).forEach(t => {
+                    if (t.txn_type === 'emergency_contribution') totalPoolIn += Number(t.amount);
+                    if (t.txn_type === 'emergency_assistance') totalPoolOut += Number(t.amount);
+                });
+
+                // 3. Calculate each member's contribution
                 const map = {};
                 for (const t of (data || [])) {
-                    if (t.status === 'REVERSED' || !t.member_id) continue;
-                    map[t.member_id] = map[t.member_id] || { name: t.members?.full_name, in: 0, out: 0 };
-                    if (t.txn_type === 'emergency_contribution') map[t.member_id].in += Number(t.amount);
-                    else map[t.member_id].out += Number(t.amount);
+                    if (!t.member_id) continue;
+                    map[t.member_id] = map[t.member_id] || { name: t.members?.full_name, contributed: 0 };
+                    if (t.txn_type === 'emergency_contribution') {
+                        map[t.member_id].contributed += Number(t.amount);
+                    }
                 }
-                const rows = Object.values(map).map(r => ({
-                    ...r,
-                    contributed: money.fmt(r.in, false),
-                    out: money.fmt(r.out, false),
-                    balance: money.fmt(Math.max(0, r.in - r.out), false)
-                })).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+                // 4. Apply the fair-share deduction
+                const rows = Object.values(map).map(r => {
+                    const deduction = totalPoolIn > 0 ? Math.round((r.contributed / totalPoolIn) * totalPoolOut) : 0;
+                    const balance = r.contributed - deduction;
+
+                    return {
+                        name: r.name,
+                        contributed: money.fmt(r.contributed, false),
+                        deduction: money.fmt(deduction, false),
+                        balance: money.fmt(balance, false)
+                    };
+                }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
                 return {
                     columns: [
                         { header: 'Name', dataKey: 'name' },
-                        { header: 'Contributed', dataKey: 'contributed', align: 'right' },
-                        { header: 'Assistance received', dataKey: 'out', align: 'right' },
-                        { header: 'Balance', dataKey: 'balance', align: 'right' }
+                        { header: 'Total Contributed', dataKey: 'contributed', align: 'right' },
+                        { header: 'Fair-Share Deduction', dataKey: 'deduction', align: 'right' },
+                        { header: 'Balance Remaining', dataKey: 'balance', align: 'right' }
                     ],
                     rows,
-                    summary: [{
-                        label: 'Total emergency balance',
-                        value: money.fmt(rows.reduce((a, r) => a + Number(String(r.balance).replace(/,/g, '')), 0))
-                    }]
+                    summary: [
+                        { label: 'Total Pool Contributions', value: money.fmt(totalPoolIn) },
+                        { label: 'Total Assistance Paid', value: money.fmt(totalPoolOut) },
+                        { label: 'Total Pool Remaining', value: money.fmt(totalPoolIn - totalPoolOut) }
+                    ]
                 };
             }
         },
